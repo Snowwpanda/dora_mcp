@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dora": {
+      "command": "python",
+      "args": ["-m", "dora_mcp.server"],
+      "description": "DORA publication repository MCP server"
+    }
+  }
+}
