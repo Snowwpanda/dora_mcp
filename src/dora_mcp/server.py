@@ -1,6 +1,7 @@
 """MCP server for DORA (Digital Object Repository for Academia) publications."""
 
 import logging
+import os
 from typing import Any
 from urllib.parse import quote
 
@@ -146,9 +147,113 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
 async def main():
     """Run the MCP server."""
-    logger.info("Starting DORA MCP server...")
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+    # Check if we should run in HTTP mode or stdio mode
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    
+    if transport == "http":
+        # HTTP/SSE mode
+        host = os.getenv("MCP_HOST", "0.0.0.0")
+        port = int(os.getenv("MCP_PORT", "8000"))
+        
+        logger.info(f"Starting DORA MCP server in HTTP mode on {host}:{port}")
+        
+        from mcp.server.sse import SseServerTransport
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.responses import Response
+        
+        sse = SseServerTransport("/messages")
+        
+        #  Create raw ASGI apps that can be mounted
+        class SSEApp:
+            """ASGI app for SSE endpoint."""
+            async def __call__(self, scope, receive, send):
+                async with sse.connect_sse(scope, receive, send) as streams:
+                    await app.run(
+                        streams[0], streams[1], app.create_initialization_options()
+                    )
+        
+        class MessagesApp:
+            """ASGI app for messages endpoint."""
+            async def __call__(self, scope, receive, send):
+                await sse.handle_post_message(scope, receive, send)
+        
+        from starlette.routing import Mount, Route
+        from starlette.responses import JSONResponse
+        
+        # Simple REST endpoints for convenience
+        async def root_endpoint(request):
+            """Root endpoint with API documentation."""
+            return JSONResponse({
+                "service": "DORA MCP Server",
+                "version": "1.0.0",
+                "description": "Model Context Protocol server for DORA (Digital Object Repository for Academia)",
+                "transport": "http",
+                "endpoints": {
+                    "/": "API documentation (this page)",
+                    "/health": "Health check",
+                    "/tools": "List available MCP tools",
+                    "/sse": "Server-Sent Events endpoint for MCP client connections",
+                    "/messages": "POST endpoint for MCP JSON-RPC messages"
+                },
+                "mcp_protocol": "2024-11-05",
+                "documentation": "https://github.com/Snowwpanda/dora_mcp"
+            })
+        
+        async def health_endpoint(request):
+            """Health check endpoint."""
+            return JSONResponse({
+                "status": "healthy",
+                "service": "dora-mcp",
+                "transport": "http",
+                "endpoints": {
+                    "sse": "/sse",
+                    "messages": "/messages",
+                    "health": "/health",
+                    "tools": "/tools"
+                }
+            })
+        
+        async def tools_endpoint(request):
+            """List available tools as JSON."""
+            tools = await list_tools()
+            tools_data = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.inputSchema
+                }
+                for tool in tools
+            ]
+            return JSONResponse({
+                "tools": tools_data
+            })
+        
+        starlette_app = Starlette(
+            debug=True,
+            routes=[
+                Route("/", endpoint=root_endpoint),
+                Route("/health", endpoint=health_endpoint),
+                Route("/tools", endpoint=tools_endpoint),
+                Mount("/sse", app=SSEApp()),
+                Mount("/messages", app=MessagesApp()),
+            ],
+        )
+        
+        import uvicorn
+        logger.info(f"DORA MCP server is ready at http://{host}:{port}")
+        logger.info(f"SSE endpoint: http://{host}:{port}/sse")
+        logger.info(f"Messages endpoint: http://{host}:{port}/messages")
+        
+        config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+    else:
+        # stdio mode (default)
+        logger.info("Starting DORA MCP server in stdio mode...")
+        async with stdio_server() as (read_stream, write_stream):
+            logger.info("DORA MCP server is ready and listening for requests")
+            await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
 if __name__ == "__main__":

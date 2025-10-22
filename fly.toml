@@ -1,0 +1,50 @@
+# fly.toml - Fly.io configuration for DORA MCP Server
+app = "dora-mcp"
+primary_region = "iad"  # Change to your preferred region (iad=US East, ams=Amsterdam, etc.)
+
+[build]
+  # Use the existing Dockerfile
+  dockerfile = "Dockerfile"
+
+[env]
+  # MCP Server configuration
+  MCP_TRANSPORT = "http"
+  MCP_HOST = "0.0.0.0"
+  MCP_PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"  # Keep running (important for MCP server)
+  auto_start_machines = true
+  min_machines_running = 1
+  
+  # HTTP service configuration
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+  # Health check using our /health endpoint
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+    
+    [http_service.checks.headers]
+      # No special headers needed for health check
+
+# VM resources
+[[vm]]
+  memory = "512mb"  # Start small, can scale up
+  cpu_kind = "shared"
+  cpus = 1
+
+# Regions to deploy to (can add more for global availability)
+# [[regions]]
+#   name = "iad"  # US East
+#   
+# [[regions]]  
+#   name = "ams"  # Amsterdam
