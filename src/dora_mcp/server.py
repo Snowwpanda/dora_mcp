@@ -758,7 +758,7 @@ async def main():
                 Route("/openapi-connector.json", endpoint=connector_openapi_endpoint),  # Power Automate connector spec
                 Route("/openapi-copilot.json", endpoint=openapi_copilot_endpoint),  # Copilot Studio (detailed)
                 Route("/openapi-minimal.json", endpoint=openapi_minimal_endpoint),  # Copilot Studio (minimal)
-                Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["POST"]),  # Copilot Studio MCP endpoint
+                Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),  # Copilot Studio MCP endpoint
             ],
         )
         

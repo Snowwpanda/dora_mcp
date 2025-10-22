@@ -1,0 +1,12 @@
+kind: TaskDialog
+modelDisplayName: fly openapi dora
+modelDescription: MCP server for searching DORA (Digital Object Repository for Academia) scientific publications
+action:
+  kind: InvokeExternalAgentTaskAction
+  connectionReference: craf0_agentForLab402.shared_craf0-5ffly-20openapi-20dora-5f275374827ea5014e.6d15b3b348ae41baad3fb456efe72cbc
+  connectionProperties:
+    mode: Invoker
+
+  operationDetails:
+    kind: ModelContextProtocolMetadata
+    operationId: InvokeMCP

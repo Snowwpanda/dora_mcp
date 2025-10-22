@@ -9,20 +9,82 @@ schemes:
   - https
 paths:
   /mcp:
-    get:
-      summary: Get MCP Server Information
-      description: Returns information about the MCP server and available tools
-      operationId: GetMCPInfo
-      responses:
-        '200':
-          description: Server information and available tools
     post:
       summary: DORA Publications Search Server
-      description: MCP Streamable endpoint for searching scientific publications
+      description: |
+        MCP Streamable endpoint for searching scientific publications.
+        
+        Example request bodies:
+        
+        1. Initialize the connection:
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "test-client",
+              "version": "1.0.0"
+            }
+          }
+        }
+        ```
+        
+        2. List available tools:
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "tools/list"
+        }
+        ```
+        
+        3. Search for publications:
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "tools/call",
+          "params": {
+            "name": "search_publications",
+            "arguments": {
+              "search_string": "machine learning",
+              "limit": 5
+            }
+          }
+        }
+        ```
       operationId: InvokeMCP
       x-ms-agentic-protocol: mcp-streamable-1.0
+      x-ms-agentic-tools:
+        - name: search_publications
+          description: Search the DORA (Digital Object Repository for Academia) database for scientific publications. Searches across titles, abstracts, authors, and other metadata fields. Returns a list of publications matching the search criteria.
+          inputSchema:
+            type: object
+            properties:
+              search_string:
+                type: string
+                description: The search term to query. Can be an author name, title keyword, or any search term. Example 'manfred heuberger'
+            required:
+              - search_string
+      consumes:
+        - application/json
+      produces:
+        - application/json
       responses:
         '200':
           description: Success
+          examples:
+            application/json:
+              jsonrpc: "2.0"
+              id: 1
+              result:
+                protocolVersion: "2024-11-05"
+                serverInfo:
+                  name: "dora-mcp-server"
+                  version: "1.0.0"
 securityDefinitions: {}
 security: []
