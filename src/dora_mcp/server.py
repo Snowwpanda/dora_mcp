@@ -280,35 +280,160 @@ async def main():
                 )
         
         async def openapi_endpoint(request):
-            """Serve OpenAPI specification."""
-            # Return inline OpenAPI spec for Copilot Studio (Swagger 2.0)
+            """Serve OpenAPI specification in Swagger 2.0 format.
+            
+            Includes both:
+            - /mcp endpoint for Copilot Studio (MCP Streamable)
+            - /api/search endpoint for Power Automate (REST API)
+            """
+            # Determine host and scheme from request
+            host = request.url.hostname or "localhost"
+            if request.url.port and request.url.port not in (80, 443):
+                host = f"{host}:{request.url.port}"
+            scheme = "https" if request.url.scheme == "https" else "http"
+            
             return JSONResponse({
                 "swagger": "2.0",
                 "info": {
-                    "title": "DORA MCP Server",
+                    "title": "DORA Publications API",
                     "version": "1.0.0",
-                    "description": "Model Context Protocol server for DORA publications"
+                    "description": "Search the DORA (Digital Open Research Archive) for academic publications and research papers. Supports both MCP protocol (Copilot Studio) and REST API (Power Automate)."
                 },
-                "host": request.url.hostname or "localhost",
+                "host": host,
                 "basePath": "/",
-                "schemes": ["https" if request.url.scheme == "https" else "http"],
+                "schemes": [scheme],
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
                 "paths": {
+                    "/api/search": {
+                        "post": {
+                            "summary": "Search publications",
+                            "description": "Search DORA for academic publications by author name, title, keywords, or other criteria. Returns formatted citations with DOI and object URLs.",
+                            "operationId": "SearchPublications",
+                            "consumes": ["application/json"],
+                            "produces": ["application/json"],
+                            "parameters": [{
+                                "name": "body",
+                                "in": "body",
+                                "description": "Search parameters",
+                                "required": True,
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["search_string"],
+                                    "properties": {
+                                        "search_string": {
+                                            "type": "string",
+                                            "description": "Search query for publications (author name, title keywords, research topics, etc.)",
+                                            "x-ms-summary": "Search Query"
+                                        }
+                                    }
+                                }
+                            }],
+                            "responses": {
+                                "200": {
+                                    "description": "Successful search",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "search_string": {
+                                                "type": "string",
+                                                "description": "The search query that was executed"
+                                            },
+                                            "total": {
+                                                "type": "integer",
+                                                "description": "Total number of publications found"
+                                            },
+                                            "results": {
+                                                "type": "array",
+                                                "description": "List of publications matching the search criteria",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "citation": {
+                                                            "type": "string",
+                                                            "description": "Formatted citation in ACS style"
+                                                        },
+                                                        "doi": {
+                                                            "type": "string",
+                                                            "description": "DOI URL for the publication"
+                                                        },
+                                                        "object_url": {
+                                                            "type": "string",
+                                                            "description": "Direct link to the publication in DORA repository"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "400": {
+                                    "description": "Bad request - missing or invalid search_string"
+                                },
+                                "500": {
+                                    "description": "Internal server error"
+                                }
+                            }
+                        }
+                    },
                     "/mcp": {
                         "post": {
-                            "summary": "DORA Publications Search Server",
-                            "description": "MCP server for searching DORA publications",
+                            "summary": "MCP Streamable endpoint (Copilot Studio)",
+                            "description": "Model Context Protocol endpoint for Microsoft Copilot Studio integration using JSON-RPC 2.0 protocol",
                             "x-ms-agentic-protocol": "mcp-streamable-1.0",
                             "operationId": "InvokeMCP",
+                            "consumes": ["application/json"],
+                            "produces": ["application/json"],
                             "parameters": [{
                                 "name": "body",
                                 "in": "body",
                                 "required": True,
-                                "schema": {"type": "object"}
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "jsonrpc": {
+                                            "type": "string",
+                                            "enum": ["2.0"]
+                                        },
+                                        "id": {
+                                            "type": "integer"
+                                        },
+                                        "method": {
+                                            "type": "string",
+                                            "enum": ["initialize", "tools/list", "tools/call"]
+                                        },
+                                        "params": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
                             }],
                             "responses": {
                                 "200": {
-                                    "description": "Success",
+                                    "description": "JSON-RPC 2.0 response",
                                     "schema": {"type": "object"}
+                                }
+                            }
+                        }
+                    },
+                    "/health": {
+                        "get": {
+                            "summary": "Health check",
+                            "description": "Check if the server is running and healthy",
+                            "operationId": "HealthCheck",
+                            "produces": ["application/json"],
+                            "responses": {
+                                "200": {
+                                    "description": "Server is healthy",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "status": {
+                                                "type": "string",
+                                                "enum": ["healthy"]
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
