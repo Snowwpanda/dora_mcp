@@ -1,0 +1,276 @@
+swagger: '2.0'swagger: '2.0'
+
+info:info:
+
+  title: DORA Publications API  title: DORA MCP Server
+
+  version: 1.0.0  description: Model Context Protocol server for DORA (Digital Object Repository for Academia) publications. Search scientific publications across titles, abstracts, authors, and metadata fields.
+
+  description: |  version: 1.0.0
+
+    REST API for searching the DORA (Digital Object Repository for Academia) database.host: your-app-name.fly.dev
+
+    basePath: /
+
+    This API provides endpoints for:schemes:
+
+    - Searching scientific publications by keywords or author names  - https
+
+    - Health checksconsumes:
+
+    - Tool discovery  - application/json
+
+    produces:
+
+    For Microsoft Copilot Studio integration, use the MCP endpoint at /mcp with the   - application/json
+
+    openapi-copilot-studio.yaml specification.paths:
+
+  /mcp:
+
+host: dora-mcp-xrtnba.fly.dev    post:
+
+basePath: /      summary: DORA Publications Search Server
+
+schemes:      description: MCP server for searching DORA publications using JSON-RPC 2.0 protocol
+
+  - https      x-ms-agentic-protocol: mcp-streamable-1.0
+
+  - http      operationId: InvokeMCP
+
+      consumes:
+
+consumes:        - application/json
+
+  - application/json      produces:
+
+produces:        - application/json
+
+  - application/json      parameters:
+
+        - name: body
+
+paths:          in: body
+
+  /health:          required: true
+
+    get:          schema:
+
+      summary: Health check            type: object
+
+      description: Check if the service is running and healthy            properties:
+
+      operationId: healthCheck              jsonrpc:
+
+      responses:                type: string
+
+        '200':                enum:
+
+          description: Service is healthy                  - '2.0'
+
+          schema:                description: JSON-RPC version
+
+            type: object              id:
+
+            properties:                type: integer
+
+              status:                description: Request ID
+
+                type: string              method:
+
+                example: healthy                type: string
+
+              service:                enum:
+
+                type: string                  - initialize
+
+                example: dora-mcp                  - tools/list
+
+              transport:                  - tools/call
+
+                type: string                description: MCP method to call
+
+                example: http-streamable              params:
+
+                type: object
+
+  /tools:                description: Method parameters
+
+    get:      responses:
+
+      summary: List available tools        '200':
+
+      description: Get a list of all available MCP tools with their descriptions and schemas          description: JSON-RPC 2.0 response
+
+      operationId: listTools          schema:
+
+      responses:            type: object
+
+        '200':            properties:
+
+          description: List of available tools              jsonrpc:
+
+          schema:                type: string
+
+            type: object              id:
+
+            properties:                type: integer
+
+              tools:              result:
+
+                type: array                type: object
+
+                items:              error:
+
+                  type: object                type: object
+
+                  properties:
+                    name:
+                      type: string
+                      example: search_publications
+                    description:
+                      type: string
+                      example: Search DORA for scientific publications
+                    inputSchema:
+                      type: object
+                      description: JSON Schema for the tool's input parameters
+
+  /api/search:
+    post:
+      summary: Search DORA publications (REST API)
+      description: |
+        Search for scientific publications in the DORA database.
+        
+        **IMPORTANT**: Use SHORT KEYWORDS or AUTHOR NAMES, not long phrases.
+        
+        Good examples:
+        - "manfred heuberger"
+        - "polymer coating"
+        - "tribology"
+        
+        Bad examples:
+        - "find papers about machine learning applications"
+        - "what are the latest studies on climate change"
+      operationId: searchPublications
+      parameters:
+        - name: body
+          in: body
+          required: true
+          description: Search request
+          schema:
+            type: object
+            required:
+              - search_string
+            properties:
+              search_string:
+                type: string
+                description: SHORT search keywords or author name (1-3 keywords maximum)
+                example: climate change
+      responses:
+        '200':
+          description: Search results
+          schema:
+            type: object
+            properties:
+              search_string:
+                type: string
+                description: The search query that was executed
+              total:
+                type: integer
+                description: Total number of results
+              results:
+                type: object
+                description: Raw JSON response from DORA API
+        '400':
+          description: Bad request - missing search_string
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+        '500':
+          description: Internal server error
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+  /connector:
+    post:
+      summary: Search publications (Power Automate connector)
+      description: |
+        Dedicated endpoint for Power Automate custom connectors.
+        Search for academic publications by author name, title, keywords, or research topics.
+        
+        **Use SHORT KEYWORDS** - Examples: "climate change", "John Smith", "polymer coating"
+      operationId: connectorSearch
+      parameters:
+        - name: body
+          in: body
+          required: true
+          description: Search request
+          schema:
+            type: object
+            required:
+              - search_string
+            properties:
+              search_string:
+                type: string
+                description: Search query (author name, title keywords, research topics)
+                example: machine learning
+      responses:
+        '200':
+          description: Search completed successfully
+          schema:
+            type: object
+            properties:
+              search_string:
+                type: string
+                description: The search query that was executed
+              total:
+                type: integer
+                description: Total number of publications found
+              results:
+                type: array
+                description: List of publications
+                items:
+                  type: object
+                  properties:
+                    citation:
+                      type: string
+                      description: Formatted citation (ACS style)
+                    doi:
+                      type: string
+                      description: DOI URL
+                    object_url:
+                      type: string
+                      description: DORA repository link
+        '400':
+          description: Bad request - missing or invalid search_string
+        '500':
+          description: Internal server error
+
+  /mcp:
+    get:
+      summary: MCP endpoint information
+      description: Get information about the MCP endpoint, protocol version, and available tools
+      operationId: mcpInfo
+      responses:
+        '200':
+          description: MCP endpoint information
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              version:
+                type: string
+              description:
+                type: string
+              usage:
+                type: object
+              available_tools:
+                type: array
+                items:
+                  type: object

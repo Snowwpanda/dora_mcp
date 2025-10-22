@@ -88,7 +88,10 @@ async def list_tools() -> list[Tool]:
                 "Search the DORA (Digital Object Repository for Academia) database "
                 "for scientific publications. Searches across titles, abstracts, "
                 "authors, and other metadata fields. Returns a list of publications "
-                "matching the search criteria."
+                "matching the search criteria. "
+                "IMPORTANT: Use SHORT KEYWORDS or AUTHOR NAMES, not long phrases. "
+                "Examples: 'climate change', 'machine learning', 'John Smith'. "
+                "Avoid using full sentences or questions."
             ),
             inputSchema={
                 "type": "object",
@@ -96,8 +99,11 @@ async def list_tools() -> list[Tool]:
                     "search_string": {
                         "type": "string",
                         "description": (
-                            "The search term to query. Can be an author name, "
-                            "title keyword, or any search term. Example: 'manfred heuberger'"
+                            "SHORT search keywords or author name. "
+                            "Use 1-3 keywords maximum, NOT full sentences. "
+                            "Good examples: 'manfred heuberger', 'polymer coating', 'tribology'. "
+                            "Bad examples: 'find papers about machine learning applications', "
+                            "'what are the latest studies on climate change'."
                         ),
                     },
                 },
@@ -173,28 +179,30 @@ async def main():
                 "transport": "http",
                 "endpoints": {
                     "/": "API documentation (this page)",
+                    "/docs": "Swagger UI - Interactive API documentation",
                     "/health": "Health check",
                     "/tools": "List available MCP tools",
-                    "/mcp": "POST - MCP Streamable endpoint (for Microsoft Copilot Studio)",
+                    "/mcp": "MCP Streamable endpoint (GET for info, POST for protocol - for Microsoft Copilot Studio)",
                     "/api/search": "POST - Search DORA publications (REST API)",
-                    "/connector": "POST - Power Automate custom connector endpoint (recommended)",
-                    "/openapi.json": "OpenAPI spec for general REST API",
-                    "/openapi-connector.json": "OpenAPI spec for Power Automate connector (recommended)",
-                    "/openapi-copilot.json": "OpenAPI spec for Copilot Studio (MCP protocol)",
-                    "/openapi-minimal.json": "Minimal OpenAPI spec for Copilot Studio (following Microsoft example)"
+                    "/connector": "POST - Power Automate custom connector endpoint"
+                },
+                "openapi_specs": {
+                    "rest_api": "/openapi.yaml",
+                    "copilot_studio": "/openapi-copilot-studio.yaml",
+                    "tool_description": "/open_tool_description.yaml"
                 },
                 "mcp_protocol": "2024-11-05",
                 "copilot_studio": {
                     "endpoint": "/mcp",
                     "protocol": "mcp-streamable-1.0",
-                    "openapi_spec": "/openapi-copilot.json",
+                    "openapi_spec": "/openapi-copilot-studio.yaml",
+                    "tool_description": "/open_tool_description.yaml",
                     "documentation": "See COPILOT_STUDIO.md"
                 },
                 "power_automate": {
                     "endpoint": "/connector",
                     "protocol": "REST API",
-                    "openapi_spec": "/openapi-connector.json",
-                    "note": "Use /connector endpoint and /openapi-connector.json spec for Power Automate custom connectors"
+                    "note": "Use /connector endpoint for Power Automate custom connectors"
                 },
                 "documentation": "https://github.com/Snowwpanda/dora_mcp"
             })
@@ -293,338 +301,7 @@ async def main():
                     {"error": str(e)},
                     status_code=500
                 )
-        
-        async def connector_openapi_endpoint(request):
-            """Serve OpenAPI specification for the /connector endpoint.
-            
-            This is a minimal, focused spec for Power Automate with only
-            the connector endpoint - no MCP, no health checks, nothing else.
-            """
-            # Determine host and scheme from request
-            host = request.url.hostname or "localhost"
-            if request.url.port and request.url.port not in (80, 443):
-                host = f"{host}:{request.url.port}"
-            scheme = "https" if request.url.scheme == "https" else "http"
-            
-            return JSONResponse({
-                "swagger": "2.0",
-                "info": {
-                    "title": "DORA Publications Search",
-                    "version": "1.0.0",
-                    "description": "Search the DORA (Digital Open Research Archive) for academic publications and research papers."
-                },
-                "host": host,
-                "basePath": "/",
-                "schemes": [scheme],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "paths": {
-                    "/connector": {
-                        "post": {
-                            "summary": "Search DORA publications",
-                            "description": "Search for academic publications by author name, title, keywords, or research topics. Returns formatted citations with DOI links and DORA repository URLs.",
-                            "operationId": "SearchPublications",
-                            "consumes": ["application/json"],
-                            "produces": ["application/json"],
-                            "parameters": [{
-                                "name": "body",
-                                "in": "body",
-                                "description": "Search request",
-                                "required": True,
-                                "schema": {
-                                    "type": "object",
-                                    "required": ["search_string"],
-                                    "properties": {
-                                        "search_string": {
-                                            "type": "string",
-                                            "description": "Search query (author name, title keywords, research topics, etc.)",
-                                            "x-ms-summary": "Search Query",
-                                            "example": "climate change"
-                                        }
-                                    }
-                                }
-                            }],
-                            "responses": {
-                                "200": {
-                                    "description": "Search completed successfully",
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "search_string": {
-                                                "type": "string",
-                                                "description": "The search query that was executed",
-                                                "x-ms-summary": "Search Query"
-                                            },
-                                            "total": {
-                                                "type": "integer",
-                                                "description": "Total number of publications found",
-                                                "x-ms-summary": "Total Results"
-                                            },
-                                            "results": {
-                                                "type": "array",
-                                                "description": "List of publications",
-                                                "x-ms-summary": "Publications",
-                                                "items": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "citation": {
-                                                            "type": "string",
-                                                            "description": "Formatted citation (ACS style)",
-                                                            "x-ms-summary": "Citation"
-                                                        },
-                                                        "doi": {
-                                                            "type": "string",
-                                                            "description": "DOI URL",
-                                                            "x-ms-summary": "DOI"
-                                                        },
-                                                        "object_url": {
-                                                            "type": "string",
-                                                            "description": "DORA repository link",
-                                                            "x-ms-summary": "DORA URL"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                "400": {
-                                    "description": "Bad request - missing or invalid search_string"
-                                },
-                                "500": {
-                                    "description": "Internal server error"
-                                }
-                            }
-                        }
-                    }
-                }
-            })
-        
-        async def openapi_power_automate_endpoint(request):
-            """Serve OpenAPI specification for Power Automate.
-            
-            Only includes REST API endpoints compatible with Power Automate.
-            Does NOT include /mcp endpoint (use /openapi-copilot.json for that).
-            """
-            # Determine host and scheme from request
-            host = request.url.hostname or "localhost"
-            if request.url.port and request.url.port not in (80, 443):
-                host = f"{host}:{request.url.port}"
-            scheme = "https" if request.url.scheme == "https" else "http"
-            
-            return JSONResponse({
-                "swagger": "2.0",
-                "info": {
-                    "title": "DORA Publications API",
-                    "version": "1.0.0",
-                    "description": "Search the DORA (Digital Open Research Archive) for academic publications and research papers via REST API."
-                },
-                "host": host,
-                "basePath": "/",
-                "schemes": [scheme],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "paths": {
-                    "/api/search": {
-                        "post": {
-                            "summary": "Search publications",
-                            "description": "Search DORA for academic publications by author name, title, keywords, or other criteria. Returns formatted citations with DOI and object URLs.",
-                            "operationId": "SearchPublications",
-                            "consumes": ["application/json"],
-                            "produces": ["application/json"],
-                            "parameters": [{
-                                "name": "body",
-                                "in": "body",
-                                "description": "Search parameters",
-                                "required": True,
-                                "schema": {
-                                    "type": "object",
-                                    "required": ["search_string"],
-                                    "properties": {
-                                        "search_string": {
-                                            "type": "string",
-                                            "description": "Search query for publications (author name, title keywords, research topics, etc.)",
-                                            "x-ms-summary": "Search Query"
-                                        }
-                                    }
-                                }
-                            }],
-                            "responses": {
-                                "200": {
-                                    "description": "Successful search",
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "search_string": {
-                                                "type": "string",
-                                                "description": "The search query that was executed"
-                                            },
-                                            "total": {
-                                                "type": "integer",
-                                                "description": "Total number of publications found"
-                                            },
-                                            "results": {
-                                                "type": "array",
-                                                "description": "List of publications matching the search criteria",
-                                                "items": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "citation": {
-                                                            "type": "string",
-                                                            "description": "Formatted citation in ACS style"
-                                                        },
-                                                        "doi": {
-                                                            "type": "string",
-                                                            "description": "DOI URL for the publication"
-                                                        },
-                                                        "object_url": {
-                                                            "type": "string",
-                                                            "description": "Direct link to the publication in DORA repository"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                "400": {
-                                    "description": "Bad request - missing or invalid search_string"
-                                },
-                                "500": {
-                                    "description": "Internal server error"
-                                }
-                            }
-                        }
-                    },
-                    "/health": {
-                        "get": {
-                            "summary": "Health check",
-                            "description": "Check if the server is running and healthy",
-                            "operationId": "HealthCheck",
-                            "produces": ["application/json"],
-                            "responses": {
-                                "200": {
-                                    "description": "Server is healthy",
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "status": {
-                                                "type": "string",
-                                                "enum": ["healthy"]
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            })
-        
-        async def openapi_copilot_endpoint(request):
-            """Serve OpenAPI specification for Copilot Studio.
-            
-            Includes MCP Streamable endpoint with x-ms-agentic-protocol.
-            """
-            # Determine host and scheme from request
-            host = request.url.hostname or "localhost"
-            if request.url.port and request.url.port not in (80, 443):
-                host = f"{host}:{request.url.port}"
-            scheme = "https" if request.url.scheme == "https" else "http"
-            
-            return JSONResponse({
-                "swagger": "2.0",
-                "info": {
-                    "title": "DORA MCP Server",
-                    "version": "1.0.0",
-                    "description": "Model Context Protocol server for DORA publications (Copilot Studio)"
-                },
-                "host": host,
-                "basePath": "/",
-                "schemes": [scheme],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "paths": {
-                    "/mcp": {
-                        "post": {
-                            "summary": "MCP Streamable endpoint",
-                            "description": "Model Context Protocol endpoint for Microsoft Copilot Studio integration using JSON-RPC 2.0 protocol",
-                            "x-ms-agentic-protocol": "mcp-streamable-1.0",
-                            "operationId": "InvokeMCP",
-                            "consumes": ["application/json"],
-                            "produces": ["application/json"],
-                            "parameters": [{
-                                "name": "body",
-                                "in": "body",
-                                "required": True,
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "jsonrpc": {
-                                            "type": "string",
-                                            "enum": ["2.0"]
-                                        },
-                                        "id": {
-                                            "type": "integer"
-                                        },
-                                        "method": {
-                                            "type": "string",
-                                            "enum": ["initialize", "tools/list", "tools/call"]
-                                        },
-                                        "params": {
-                                            "type": "object"
-                                        }
-                                    }
-                                }
-                            }],
-                            "responses": {
-                                "200": {
-                                    "description": "JSON-RPC 2.0 response",
-                                    "schema": {"type": "object"}
-                                }
-                            }
-                        }
-                    }
-                }
-            })
-        
-        async def openapi_minimal_endpoint(request):
-            """Serve minimal OpenAPI specification for Copilot Studio.
-            
-            This is the absolute minimal spec following Microsoft's example.
-            """
-            # Determine host and scheme from request
-            host = request.url.hostname or "localhost"
-            if request.url.port and request.url.port not in (80, 443):
-                host = f"{host}:{request.url.port}"
-            scheme = "https" if request.url.scheme == "https" else "http"
-            
-            return JSONResponse({
-                "swagger": "2.0",
-                "info": {
-                    "title": "DORA Publications MCP Server",
-                    "description": "MCP server for searching DORA (Digital Object Repository for Academia) publications",
-                    "version": "1.0.0"
-                },
-                "host": host,
-                "basePath": "/",
-                "schemes": [scheme],
-                "paths": {
-                    "/mcp": {
-                        "post": {
-                            "summary": "DORA Publications Search Server",
-                            "x-ms-agentic-protocol": "mcp-streamable-1.0",
-                            "operationId": "InvokeMCP",
-                            "responses": {
-                                "200": {
-                                    "description": "Success"
-                                }
-                            }
-                        }
-                    }
-                }
-            })
-        
+      
         async def mcp_streamable_endpoint(request):
             """MCP Streamable HTTP endpoint for Copilot Studio."""
             # Handle GET requests - return instructions
@@ -667,6 +344,8 @@ async def main():
                 # Read the JSON-RPC request
                 body = await request.json()
                 
+                logger.info(f"Received MCP request: method={body.get('method')}, id={body.get('id')}")
+                
                 # Handle MCP protocol messages
                 if body.get("method") == "tools/list":
                     tools = await list_tools()
@@ -684,6 +363,7 @@ async def main():
                             ]
                         }
                     }
+                    logger.info(f"Returning {len(tools)} tools")
                     return JSONResponse(response)
                 
                 elif body.get("method") == "tools/call":
@@ -709,6 +389,8 @@ async def main():
                     return JSONResponse(response)
                 
                 elif body.get("method") == "initialize":
+                    logger.info("Handling initialize request")
+                    tools = await list_tools()
                     response = {
                         "jsonrpc": "2.0",
                         "id": body.get("id"),
@@ -720,10 +402,25 @@ async def main():
                             "serverInfo": {
                                 "name": "dora-mcp",
                                 "version": "1.0.0"
-                            }
+                            },
+                            "tools": [
+                                {
+                                    "name": tool.name,
+                                    "description": tool.description,
+                                    "inputSchema": tool.inputSchema
+                                }
+                                for tool in tools
+                            ]
                         }
                     }
+                    logger.info("Initialize successful")
                     return JSONResponse(response)
+                
+                # Handle notifications/initialized (client acknowledgment, no response needed)
+                elif body.get("method") == "notifications/initialized":
+                    logger.info("Received initialized notification")
+                    # Notifications don't require a response
+                    return JSONResponse({"jsonrpc": "2.0"}, status_code=200)
                 
                 else:
                     return JSONResponse({
@@ -746,19 +443,79 @@ async def main():
                     }
                 }, status_code=500)
         
+        async def swagger_ui_endpoint(request):
+            """Serve Swagger UI for interactive API documentation."""
+            html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>DORA Publications API - Swagger UI</title>
+                <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+                <style>
+                    body { margin: 0; padding: 0; }
+                </style>
+            </head>
+            <body>
+                <div id="swagger-ui"></div>
+                <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+                <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+                <script>
+                    window.onload = function() {
+                        SwaggerUIBundle({
+                            url: "/openapi.yaml",
+                            dom_id: '#swagger-ui',
+                            presets: [
+                                SwaggerUIBundle.presets.apis,
+                                SwaggerUIStandalonePreset
+                            ],
+                            layout: "BaseLayout",
+                            deepLinking: true,
+                            showExtensions: true,
+                            showCommonExtensions: true
+                        });
+                    };
+                </script>
+            </body>
+            </html>
+            """
+            from starlette.responses import HTMLResponse
+            return HTMLResponse(html)
+        
+        async def serve_yaml_file(request):
+            """Serve static YAML files."""
+            from starlette.responses import FileResponse
+            import pathlib
+            
+            # Get the requested file path
+            filename = request.path_params.get("filename", "openapi.yaml")
+            
+            # Get the project root directory (parent of src/)
+            project_root = pathlib.Path(__file__).parent.parent.parent
+            file_path = project_root / filename
+            
+            if not file_path.exists():
+                return JSONResponse(
+                    {"error": f"File not found: {filename}"},
+                    status_code=404
+                )
+            
+            return FileResponse(
+                file_path,
+                media_type="application/x-yaml",
+                filename=filename
+            )
+        
         starlette_app = Starlette(
             debug=True,
             routes=[
                 Route("/", endpoint=root_endpoint),
+                Route("/docs", endpoint=swagger_ui_endpoint),
                 Route("/health", endpoint=health_endpoint),
                 Route("/tools", endpoint=tools_endpoint),
                 Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
-                Route("/connector", endpoint=connector_endpoint, methods=["POST"]),  # Power Automate connector
-                Route("/openapi.json", endpoint=openapi_power_automate_endpoint),  # Power Automate (legacy)
-                Route("/openapi-connector.json", endpoint=connector_openapi_endpoint),  # Power Automate connector spec
-                Route("/openapi-copilot.json", endpoint=openapi_copilot_endpoint),  # Copilot Studio (detailed)
-                Route("/openapi-minimal.json", endpoint=openapi_minimal_endpoint),  # Copilot Studio (minimal)
-                Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),  # Copilot Studio MCP endpoint
+                Route("/connector", endpoint=connector_endpoint, methods=["POST"]),
+                Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),
+                Route("/{filename:path}.yaml", endpoint=serve_yaml_file),  # Serve YAML files
             ],
         )
         
