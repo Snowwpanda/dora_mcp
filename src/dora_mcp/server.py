@@ -203,14 +203,21 @@ async def main():
                     "/health": "Health check",
                     "/tools": "List available MCP tools",
                     "/mcp": "POST - MCP Streamable endpoint (for Microsoft Copilot Studio)",
-                    "/api/search": "POST - Search DORA publications (REST API)",
+                    "/api/search": "POST - Search DORA publications (REST API for Power Automate)",
                     "/sse": "Server-Sent Events endpoint (deprecated for Copilot Studio)",
-                    "/messages": "POST endpoint for MCP JSON-RPC messages"
+                    "/messages": "POST endpoint for MCP JSON-RPC messages",
+                    "/openapi.json": "OpenAPI spec for Power Automate (REST API only)",
+                    "/openapi-copilot.json": "OpenAPI spec for Copilot Studio (MCP protocol)"
                 },
                 "mcp_protocol": "2024-11-05",
                 "copilot_studio": {
                     "endpoint": "/mcp",
                     "protocol": "mcp-streamable-1.0",
+                    "openapi_spec": "/openapi-copilot.json"
+                },
+                "power_automate": {
+                    "endpoint": "/api/search",
+                    "protocol": "REST API",
                     "openapi_spec": "/openapi.json"
                 },
                 "documentation": "https://github.com/Snowwpanda/dora_mcp"
@@ -279,12 +286,11 @@ async def main():
                     status_code=500
                 )
         
-        async def openapi_endpoint(request):
-            """Serve OpenAPI specification in Swagger 2.0 format.
+        async def openapi_power_automate_endpoint(request):
+            """Serve OpenAPI specification for Power Automate.
             
-            Includes both:
-            - /mcp endpoint for Copilot Studio (MCP Streamable)
-            - /api/search endpoint for Power Automate (REST API)
+            Only includes REST API endpoints compatible with Power Automate.
+            Does NOT include /mcp endpoint (use /openapi-copilot.json for that).
             """
             # Determine host and scheme from request
             host = request.url.hostname or "localhost"
@@ -297,7 +303,7 @@ async def main():
                 "info": {
                     "title": "DORA Publications API",
                     "version": "1.0.0",
-                    "description": "Search the DORA (Digital Open Research Archive) for academic publications and research papers. Supports both MCP protocol (Copilot Studio) and REST API (Power Automate)."
+                    "description": "Search the DORA (Digital Open Research Archive) for academic publications and research papers via REST API."
                 },
                 "host": host,
                 "basePath": "/",
@@ -376,9 +382,58 @@ async def main():
                             }
                         }
                     },
+                    "/health": {
+                        "get": {
+                            "summary": "Health check",
+                            "description": "Check if the server is running and healthy",
+                            "operationId": "HealthCheck",
+                            "produces": ["application/json"],
+                            "responses": {
+                                "200": {
+                                    "description": "Server is healthy",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "status": {
+                                                "type": "string",
+                                                "enum": ["healthy"]
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        
+        async def openapi_copilot_endpoint(request):
+            """Serve OpenAPI specification for Copilot Studio.
+            
+            Includes MCP Streamable endpoint with x-ms-agentic-protocol.
+            """
+            # Determine host and scheme from request
+            host = request.url.hostname or "localhost"
+            if request.url.port and request.url.port not in (80, 443):
+                host = f"{host}:{request.url.port}"
+            scheme = "https" if request.url.scheme == "https" else "http"
+            
+            return JSONResponse({
+                "swagger": "2.0",
+                "info": {
+                    "title": "DORA MCP Server",
+                    "version": "1.0.0",
+                    "description": "Model Context Protocol server for DORA publications (Copilot Studio)"
+                },
+                "host": host,
+                "basePath": "/",
+                "schemes": [scheme],
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "paths": {
                     "/mcp": {
                         "post": {
-                            "summary": "MCP Streamable endpoint (Copilot Studio)",
+                            "summary": "MCP Streamable endpoint",
                             "description": "Model Context Protocol endpoint for Microsoft Copilot Studio integration using JSON-RPC 2.0 protocol",
                             "x-ms-agentic-protocol": "mcp-streamable-1.0",
                             "operationId": "InvokeMCP",
@@ -412,28 +467,6 @@ async def main():
                                 "200": {
                                     "description": "JSON-RPC 2.0 response",
                                     "schema": {"type": "object"}
-                                }
-                            }
-                        }
-                    },
-                    "/health": {
-                        "get": {
-                            "summary": "Health check",
-                            "description": "Check if the server is running and healthy",
-                            "operationId": "HealthCheck",
-                            "produces": ["application/json"],
-                            "responses": {
-                                "200": {
-                                    "description": "Server is healthy",
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "status": {
-                                                "type": "string",
-                                                "enum": ["healthy"]
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -539,7 +572,8 @@ async def main():
                 Route("/health", endpoint=health_endpoint),
                 Route("/tools", endpoint=tools_endpoint),
                 Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
-                Route("/openapi.json", endpoint=openapi_endpoint),
+                Route("/openapi.json", endpoint=openapi_power_automate_endpoint),  # Power Automate
+                Route("/openapi-copilot.json", endpoint=openapi_copilot_endpoint),  # Copilot Studio
                 Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["POST"]),  # Copilot Studio MCP endpoint
                 Mount("/sse", app=SSEApp()),
                 Mount("/messages", app=MessagesApp()),
