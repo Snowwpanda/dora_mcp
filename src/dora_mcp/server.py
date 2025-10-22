@@ -160,9 +160,18 @@ async def main():
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
         from starlette.routing import Route
-        from starlette.responses import Response
+        from starlette.responses import Response, StreamingResponse
+        import json
         
         sse = SseServerTransport("/messages")
+        
+        # Check if streamable transport is available
+        try:
+            from mcp.server.streamable import StreamableServerTransport
+            streamable_available = True
+        except ImportError:
+            streamable_available = False
+            logger.warning("Streamable transport not available in current MCP SDK version")
         
         #  Create raw ASGI apps that can be mounted
         class SSEApp:
@@ -193,10 +202,17 @@ async def main():
                     "/": "API documentation (this page)",
                     "/health": "Health check",
                     "/tools": "List available MCP tools",
-                    "/sse": "Server-Sent Events endpoint for MCP client connections",
+                    "/mcp": "POST - MCP Streamable endpoint (for Microsoft Copilot Studio)",
+                    "/api/search": "POST - Search DORA publications (REST API)",
+                    "/sse": "Server-Sent Events endpoint (deprecated for Copilot Studio)",
                     "/messages": "POST endpoint for MCP JSON-RPC messages"
                 },
                 "mcp_protocol": "2024-11-05",
+                "copilot_studio": {
+                    "endpoint": "/mcp",
+                    "protocol": "mcp-streamable-1.0",
+                    "openapi_spec": "/openapi.json"
+                },
                 "documentation": "https://github.com/Snowwpanda/dora_mcp"
             })
         
@@ -229,12 +245,177 @@ async def main():
                 "tools": tools_data
             })
         
+        async def search_api_endpoint(request):
+            """REST API endpoint for searching publications (for Copilot Studio)."""
+            if request.method != "POST":
+                return JSONResponse(
+                    {"error": "Method not allowed. Use POST."},
+                    status_code=405
+                )
+            
+            try:
+                body = await request.json()
+                search_string = body.get("search_string")
+                
+                if not search_string:
+                    return JSONResponse(
+                        {"error": "search_string is required"},
+                        status_code=400
+                    )
+                
+                # Perform the search
+                results = await search_dora_publications(search_string)
+                
+                return JSONResponse({
+                    "search_string": search_string,
+                    "results": results,
+                    "total": len(results) if isinstance(results, list) else 0
+                })
+                
+            except Exception as e:
+                logger.error(f"Error in search API: {e}")
+                return JSONResponse(
+                    {"error": str(e)},
+                    status_code=500
+                )
+        
+        async def openapi_endpoint(request):
+            """Serve OpenAPI specification."""
+            # Return inline OpenAPI spec for Copilot Studio (Swagger 2.0)
+            return JSONResponse({
+                "swagger": "2.0",
+                "info": {
+                    "title": "DORA MCP Server",
+                    "version": "1.0.0",
+                    "description": "Model Context Protocol server for DORA publications"
+                },
+                "host": request.url.hostname or "localhost",
+                "basePath": "/",
+                "schemes": ["https" if request.url.scheme == "https" else "http"],
+                "paths": {
+                    "/mcp": {
+                        "post": {
+                            "summary": "DORA Publications Search Server",
+                            "description": "MCP server for searching DORA publications",
+                            "x-ms-agentic-protocol": "mcp-streamable-1.0",
+                            "operationId": "InvokeMCP",
+                            "parameters": [{
+                                "name": "body",
+                                "in": "body",
+                                "required": True,
+                                "schema": {"type": "object"}
+                            }],
+                            "responses": {
+                                "200": {
+                                    "description": "Success",
+                                    "schema": {"type": "object"}
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        
+        async def mcp_streamable_endpoint(request):
+            """MCP Streamable HTTP endpoint for Copilot Studio."""
+            if request.method != "POST":
+                return JSONResponse(
+                    {"error": "Method not allowed. Use POST."},
+                    status_code=405
+                )
+            
+            try:
+                # Read the JSON-RPC request
+                body = await request.json()
+                
+                # Handle MCP protocol messages
+                if body.get("method") == "tools/list":
+                    tools = await list_tools()
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": body.get("id"),
+                        "result": {
+                            "tools": [
+                                {
+                                    "name": tool.name,
+                                    "description": tool.description,
+                                    "inputSchema": tool.inputSchema
+                                }
+                                for tool in tools
+                            ]
+                        }
+                    }
+                    return JSONResponse(response)
+                
+                elif body.get("method") == "tools/call":
+                    params = body.get("params", {})
+                    tool_name = params.get("name")
+                    arguments = params.get("arguments", {})
+                    
+                    result = await call_tool(tool_name, arguments)
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": body.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": content.type,
+                                    "text": content.text
+                                }
+                                for content in result
+                            ]
+                        }
+                    }
+                    return JSONResponse(response)
+                
+                elif body.get("method") == "initialize":
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": body.get("id"),
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {
+                                "tools": {}
+                            },
+                            "serverInfo": {
+                                "name": "dora-mcp",
+                                "version": "1.0.0"
+                            }
+                        }
+                    }
+                    return JSONResponse(response)
+                
+                else:
+                    return JSONResponse({
+                        "jsonrpc": "2.0",
+                        "id": body.get("id"),
+                        "error": {
+                            "code": -32601,
+                            "message": f"Method not found: {body.get('method')}"
+                        }
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error in MCP streamable endpoint: {e}")
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "id": body.get("id") if "body" in locals() else None,
+                    "error": {
+                        "code": -32603,
+                        "message": str(e)
+                    }
+                }, status_code=500)
+        
         starlette_app = Starlette(
             debug=True,
             routes=[
                 Route("/", endpoint=root_endpoint),
                 Route("/health", endpoint=health_endpoint),
                 Route("/tools", endpoint=tools_endpoint),
+                Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
+                Route("/openapi.json", endpoint=openapi_endpoint),
+                Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["POST"]),  # Copilot Studio MCP endpoint
                 Mount("/sse", app=SSEApp()),
                 Mount("/messages", app=MessagesApp()),
             ],
