@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  dora-mcp:
+    build: .
+    image: dora-mcp:latest
+    container_name: dora-mcp-server
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
