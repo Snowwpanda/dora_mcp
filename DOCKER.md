@@ -1,6 +1,6 @@
 # Docker Deployment Guide
 
-This guide covers running the DORA MCP server in Docker with HTTP/SSE transport.
+This guide covers running the DORA MCP server in Docker with HTTP Streamable transport.
 
 ## Quick Start
 
@@ -30,16 +30,25 @@ Once running, access at: **http://localhost:8000**
 - Root: `http://localhost:8000/` - API documentation
 - Health: `http://localhost:8000/health` - Health check
 - Tools: `http://localhost:8000/tools` - List available MCP tools
+- Search: `http://localhost:8000/api/search` - REST API for searching publications
+- Connector: `http://localhost:8000/connector` - Power Automate connector endpoint
 
 **MCP Protocol Endpoints:**
-- SSE: `http://localhost:8000/sse` - Server-Sent Events for MCP clients
-- Messages: `http://localhost:8000/messages` - JSON-RPC messages (POST)
+- MCP: `http://localhost:8000/mcp` - MCP Streamable endpoint (for Copilot Studio)
+
+**OpenAPI Specifications:**
+- `/openapi-minimal.json` - Minimal spec for Copilot Studio
+- `/openapi-copilot.json` - Detailed spec for Copilot Studio
+- `/openapi-connector.json` - Spec for Power Automate connectors
 
 ## Testing
 
 ```bash
 # Automated tests (server must be running)
 ./docker.sh test
+
+# Test MCP endpoint
+python test_mcp_endpoint.py http://localhost:8000
 
 # Manual health check
 curl http://localhost:8000/health

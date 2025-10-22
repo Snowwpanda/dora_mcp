@@ -1,147 +1,63 @@
 swagger: '2.0'
 info:
   title: DORA MCP Server
-  description: Model Context Protocol server for DORA (Digital Object Repository for Academia) publications. Supports searching scientific publications across titles, abstracts, authors, and metadata fields.
+  description: Model Context Protocol server for DORA (Digital Object Repository for Academia) publications. Search scientific publications across titles, abstracts, authors, and metadata fields.
   version: 1.0.0
 host: your-app-name.fly.dev
 basePath: /
 schemes:
   - https
+consumes:
+  - application/json
+produces:
+  - application/json
 paths:
   /mcp:
     post:
       summary: DORA Publications Search Server
-      description: MCP server for searching DORA publications
+      description: MCP server for searching DORA publications using JSON-RPC 2.0 protocol
       x-ms-agentic-protocol: mcp-streamable-1.0
       operationId: InvokeMCP
+      consumes:
+        - application/json
+      produces:
+        - application/json
       parameters:
         - name: body
           in: body
           required: true
           schema:
             type: object
+            properties:
+              jsonrpc:
+                type: string
+                enum:
+                  - '2.0'
+                description: JSON-RPC version
+              id:
+                type: integer
+                description: Request ID
+              method:
+                type: string
+                enum:
+                  - initialize
+                  - tools/list
+                  - tools/call
+                description: MCP method to call
+              params:
+                type: object
+                description: Method parameters
       responses:
         '200':
-          description: Success
+          description: JSON-RPC 2.0 response
           schema:
             type: object
-  /health:
-    get:
-      summary: Health check
-      description: Returns the health status of the server
-      operationId: healthCheck
-      responses:
-        '200':
-          description: Server is healthy
-          content:
-            application/json:
-              schema:
+            properties:
+              jsonrpc:
+                type: string
+              id:
+                type: integer
+              result:
                 type: object
-                properties:
-                  status:
-                    type: string
-                    example: healthy
-                  service:
-                    type: string
-                    example: dora-mcp
-                  transport:
-                    type: string
-                    example: http
-
-  /tools:
-    get:
-      summary: List available tools
-      description: Returns a list of all available MCP tools
-      operationId: listTools
-      responses:
-        '200':
-          description: List of available tools
-          content:
-            application/json:
-              schema:
+              error:
                 type: object
-                properties:
-                  tools:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        name:
-                          type: string
-                          example: search_publications
-                        description:
-                          type: string
-                        inputSchema:
-                          type: object
-
-  /api/search:
-    post:
-      summary: Search DORA publications
-      description: Search the DORA database for scientific publications by author name, title, or keywords
-      operationId: searchPublications
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - search_string
-              properties:
-                search_string:
-                  type: string
-                  description: The search term to query (author name, title keyword, or any search term)
-                  example: manfred heuberger
-      responses:
-        '200':
-          description: Search results
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  results:
-                    type: array
-                    items:
-                      type: object
-                  total:
-                    type: integer
-                  search_string:
-                    type: string
-        '400':
-          description: Bad request - missing or invalid search_string
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: search_string is required
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-
-components:
-  schemas:
-    Publication:
-      type: object
-      properties:
-        title:
-          type: string
-        authors:
-          type: array
-          items:
-            type: string
-        abstract:
-          type: string
-        year:
-          type: string
-        url:
-          type: string
