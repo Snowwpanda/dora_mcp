@@ -627,9 +627,39 @@ async def main():
         
         async def mcp_streamable_endpoint(request):
             """MCP Streamable HTTP endpoint for Copilot Studio."""
+            # Handle GET requests - return instructions
+            if request.method == "GET":
+                tools = await list_tools()
+                return JSONResponse({
+                    "message": "DORA MCP Server",
+                    "version": "1.0.0",
+                    "description": "MCP server for searching scientific publications in the DORA (Digital Object Repository for Academia) database",
+                    "usage": {
+                        "note": "This endpoint uses the MCP (Model Context Protocol) with Streamable transport",
+                        "method": "POST",
+                        "protocol": "mcp-streamable-1.0",
+                        "content_type": "application/json",
+                        "instructions": [
+                            "Send POST requests with JSON-RPC 2.0 format",
+                            "Include method and params in request body",
+                            "Supported methods: initialize, tools/list, tools/call"
+                        ]
+                    },
+                    "available_tools": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "inputSchema": tool.inputSchema
+                        }
+                        for tool in tools
+                    ],
+                    "documentation": "https://github.com/Snowwpanda/dora_mcp"
+                }, status_code=200)
+            
+            # Only POST is allowed for MCP protocol
             if request.method != "POST":
                 return JSONResponse(
-                    {"error": "Method not allowed. Use POST."},
+                    {"error": "Method not allowed. This endpoint requires POST requests with MCP protocol."},
                     status_code=405
                 )
             
