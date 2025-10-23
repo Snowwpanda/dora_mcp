@@ -116,30 +116,31 @@ paths:
                 description: Either the full DORA publication URL (e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') or just the publication identifier (e.g., 'empa:27842').
             required:
               - identifier_or_url
-        - name: get_publication_fulltext
-          description: |
-            Retrieve and download the full text PDF of a specific publication from DORA.
-            
-            Input: Either the full publication URL or just the publication identifier
-            
-            Examples:
-            - Full URL: "https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842"
-            - Identifier only: "empa:27842"
-            
-            Returns: 
-            - pdf_content: Base64-encoded PDF document (decode with base64 to get the original PDF binary)
-            - pdf_url: Direct URL to the PDF for reference
-            - pdf_size_bytes: Size of the PDF file in bytes
-            
-            Note: The PDF content is returned as a base64-encoded string. To use it, decode the base64 string back to binary format.
-          inputSchema:
-            type: object
-            properties:
-              identifier_or_url:
-                type: string
-                description: Either the full DORA publication URL (e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') or just the publication identifier (e.g., 'empa:27842').
-            required:
-              - identifier_or_url
+        # DISABLED: Payload too large for MCP protocol
+        # - name: get_publication_fulltext
+        #   description: |
+        #     Retrieve and download the full text PDF of a specific publication from DORA.
+        #     
+        #     Input: Either the full publication URL or just the publication identifier
+        #     
+        #     Examples:
+        #     - Full URL: "https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842"
+        #     - Identifier only: "empa:27842"
+        #     
+        #     Returns: 
+        #     - pdf_content: Base64-encoded PDF document (decode with base64 to get the original PDF binary)
+        #     - pdf_url: Direct URL to the PDF for reference
+        #     - pdf_size_bytes: Size of the PDF file in bytes
+        #     
+        #     Note: The PDF content is returned as a base64-encoded string. To use it, decode the base64 string back to binary format.
+        #   inputSchema:
+        #     type: object
+        #     properties:
+        #       identifier_or_url:
+        #         type: string
+        #         description: Either the full DORA publication URL (e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') or just the publication identifier (e.g., 'empa:27842').
+        #     required:
+        #       - identifier_or_url
       consumes:
         - application/json
       produces:
