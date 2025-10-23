@@ -52,7 +52,22 @@ paths:
             "name": "search_publications",
             "arguments": {
               "search_string": "machine learning",
-              "limit": 5
+              "limit": 10
+            }
+          }
+        }
+        ```
+        
+        4. Get publication abstract:
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "tools/call",
+          "params": {
+            "name": "get_publication_abstract",
+            "arguments": {
+              "identifier_or_url": "empa:27842"
             }
           }
         }
@@ -61,7 +76,19 @@ paths:
       x-ms-agentic-protocol: mcp-streamable-1.0
       x-ms-agentic-tools:
         - name: search_publications
-          description: Search the DORA (Digital Object Repository for Academia) database for scientific publications. Searches across titles, abstracts, authors, and other metadata fields. IMPORTANT - Use SHORT KEYWORDS or AUTHOR NAMES only, not long phrases or sentences. Examples - 'climate change', 'machine learning', 'John Smith'. Avoid full sentences or questions.
+          description: |
+            Search the DORA (Digital Object Repository for Academia) database for scientific publications. Searches across titles, abstracts, authors, and other metadata fields.
+            
+            IMPORTANT: Use SHORT KEYWORDS or AUTHOR NAMES only, not long phrases or sentences.
+            
+            Examples:
+            - Search by author: "manfred heuberger"
+            - Search by topic: "polymer coating", "tribology", "machine learning"
+            - Search by keywords: "climate change", "nanomaterials"
+            
+            Avoid: Full sentences like "find papers about machine learning applications"
+            
+            Returns: List of publications with titles, authors, publication year, DOI, and DORA URLs.
           inputSchema:
             type: object
             properties:
@@ -70,6 +97,49 @@ paths:
                 description: SHORT search keywords or author name (1-3 keywords maximum). Good examples - 'manfred heuberger', 'polymer coating', 'tribology'. Bad examples - 'find papers about machine learning'.
             required:
               - search_string
+        - name: get_publication_abstract
+          description: |
+            Retrieve the abstract of a specific publication from DORA.
+            
+            Input: Either the full publication URL or just the publication identifier
+            
+            Examples:
+            - Full URL: "https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842"
+            - Identifier only: "empa:27842"
+            
+            Returns: Both HTML-formatted and plain text versions of the abstract, along with the publication URL.
+          inputSchema:
+            type: object
+            properties:
+              identifier_or_url:
+                type: string
+                description: Either the full DORA publication URL (e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') or just the publication identifier (e.g., 'empa:27842').
+            required:
+              - identifier_or_url
+        - name: get_publication_fulltext
+          description: |
+            Retrieve and download the full text PDF of a specific publication from DORA.
+            
+            Input: Either the full publication URL or just the publication identifier
+            
+            Examples:
+            - Full URL: "https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842"
+            - Identifier only: "empa:27842"
+            
+            Returns: 
+            - pdf_content: Base64-encoded PDF document (decode with base64 to get the original PDF binary)
+            - pdf_url: Direct URL to the PDF for reference
+            - pdf_size_bytes: Size of the PDF file in bytes
+            
+            Note: The PDF content is returned as a base64-encoded string. To use it, decode the base64 string back to binary format.
+          inputSchema:
+            type: object
+            properties:
+              identifier_or_url:
+                type: string
+                description: Either the full DORA publication URL (e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') or just the publication identifier (e.g., 'empa:27842').
+            required:
+              - identifier_or_url
       consumes:
         - application/json
       produces:
