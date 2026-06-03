@@ -8,6 +8,7 @@ dependencies = [
     "mcp>=0.9.0",
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -26,3 +27,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dora_mcp"]
+
+[project.scripts]
+dora-mcp = "dora_mcp.server:run"
+dora_mcp = "dora_mcp.server:run"

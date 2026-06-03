@@ -8,9 +8,13 @@ from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -117,11 +121,12 @@ def build_publication_url(publication_id: str) -> str:
     return f"https://www.dora.lib4ri.ch/{subsite}/item/{publication_id}"
 
 
-async def search_dora_publications(search_string: str) -> dict[str, Any]:
+async def search_dora_publications(search_string: str, limit: int = 20) -> dict[str, Any]:
     """Search DORA for publications.
     
     Args:
         search_string: The search term to query
+        limit: Maximum number of results to return (default: 20)
         
     Returns:
         JSON response from DORA API containing publication results
@@ -135,13 +140,24 @@ async def search_dora_publications(search_string: str) -> dict[str, Any]:
         "extension": "false"
     }
     
-    logger.info(f"Searching DORA for: {search_string}")
+    logger.info(f"Searching DORA for: {search_string} (limit: {limit})")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, params=params)
             response.raise_for_status()
-            return response.json()
+            results = response.json()
+            
+            # Apply limit if results is a list or contains a list
+            if isinstance(results, list):
+                return results[:limit]
+            elif isinstance(results, dict) and "results" in results:
+                # Some API versions might return a dict with a results list
+                if isinstance(results["results"], list):
+                    results["results"] = results["results"][:limit]
+                return results
+            
+            return results
     except httpx.HTTPError as e:
         logger.error(f"HTTP error occurred: {e}")
         raise
@@ -279,6 +295,11 @@ async def list_tools() -> list[Tool]:
                             "'what are the latest studies on climate change'."
                         ),
                     },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 20).",
+                        "default": 20,
+                    },
                 },
                 "required": ["search_string"],
             },
@@ -316,10 +337,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     try:
         if name == "search_publications":
             search_string = arguments.get("search_string")
+            limit = arguments.get("limit", 20)
             if not search_string:
                 raise ValueError("search_string is required")
             
-            results = await search_dora_publications(search_string)
+            results = await search_dora_publications(search_string, limit=limit)
             
             # Format the results
             if isinstance(results, dict):
@@ -377,407 +399,423 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 async def main():
     """Run the MCP server."""
     # Check if we should run in HTTP mode or stdio mode
-    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    # Default is now 'http'
+    transport = os.getenv("MCP_TRANSPORT", "http").lower()
     
-    if transport == "http":
-        # HTTP mode with Streamable transport
-        host = os.getenv("MCP_HOST", "0.0.0.0")
-        port = int(os.getenv("MCP_PORT", "8000"))
-        
-        logger.info(f"Starting DORA MCP server in HTTP mode on {host}:{port}")
-        
-        from starlette.applications import Starlette
-        from starlette.routing import Route
-        from starlette.responses import JSONResponse
-        from starlette.middleware.cors import CORSMiddleware
-        import json
-        
-        # Simple REST endpoints for convenience
-        async def root_endpoint(request):
-            """Root endpoint — human-friendly landing page."""
-            import pathlib
-            from starlette.responses import HTMLResponse
-            base = str(request.base_url).rstrip("/")
-            template = (
-                pathlib.Path(__file__).parent / "templates" / "index.html"
-            ).read_text(encoding="utf-8")
-            html = template.replace("__BASE_URL__", base)
-            return HTMLResponse(html)
-        
-        async def health_endpoint(request):
-            """Health check endpoint."""
-            return JSONResponse({
-                "status": "healthy",
-                "service": "dora-mcp",
-                "transport": "http-streamable"
-            })
-        
-        async def tools_endpoint(request):
-            """List available tools as JSON."""
-            tools = await list_tools()
-            tools_data = [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "inputSchema": tool.inputSchema
-                }
-                for tool in tools
-            ]
-            return JSONResponse({
-                "tools": tools_data
-            })
-        
-        async def search_api_endpoint(request):
-            """REST API endpoint for searching publications (for Copilot Studio)."""
-            if request.method != "POST":
-                return JSONResponse(
-                    {"error": "Method not allowed. Use POST."},
-                    status_code=405
-                )
-            
-            try:
-                body = await request.json()
-                search_string = body.get("search_string")
-                
-                if not search_string:
-                    return JSONResponse(
-                        {"error": "search_string is required"},
-                        status_code=400
-                    )
-                
-                # Perform the search
-                results = await search_dora_publications(search_string)
-                
-                return JSONResponse({
-                    "search_string": search_string,
-                    "results": results,
-                    "total": len(results) if isinstance(results, list) else 0
-                })
-                
-            except Exception as e:
-                logger.error(f"Error in search API: {e}")
-                return JSONResponse(
-                    {"error": str(e)},
-                    status_code=500
-                )
-        
-        async def abstract_api_endpoint(request):
-            """REST API endpoint for retrieving a publication abstract."""
-            try:
-                body = await request.json()
-                identifier_or_url = body.get("identifier_or_url")
-
-                if not identifier_or_url:
-                    return JSONResponse(
-                        {"error": "identifier_or_url is required"},
-                        status_code=400
-                    )
-
-                result = await get_publication_abstract(identifier_or_url)
-                return JSONResponse(result)
-
-            except Exception as e:
-                logger.error(f"Error in abstract API: {e}")
-                return JSONResponse({"error": str(e)}, status_code=500)
-
-        async def mcp_streamable_endpoint(request):
-            """MCP Streamable HTTP endpoint for Copilot Studio."""
-            # Handle GET requests - return instructions
-            if request.method == "GET":
-                tools = await list_tools()
-                return JSONResponse({
-                    "message": "DORA MCP Server",
-                    "version": "1.0.0",
-                    "description": "MCP server for searching scientific publications in the DORA (Digital Object Repository for Academia) database",
-                    "usage": {
-                        "note": "This endpoint uses the MCP (Model Context Protocol) with Streamable transport",
-                        "method": "POST",
-                        "protocol": "mcp-streamable-1.0",
-                        "content_type": "application/json",
-                        "instructions": [
-                            "Send POST requests with JSON-RPC 2.0 format",
-                            "Include method and params in request body",
-                            "Supported methods: initialize, tools/list, tools/call"
-                        ]
-                    },
-                    "available_tools": [
-                        {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "inputSchema": tool.inputSchema
-                        }
-                        for tool in tools
-                    ],
-                    "documentation": "https://github.com/Snowwpanda/dora_mcp"
-                }, status_code=200)
-            
-            # Only POST is allowed for MCP protocol
-            if request.method != "POST":
-                return JSONResponse(
-                    {"error": "Method not allowed. This endpoint requires POST requests with MCP protocol."},
-                    status_code=405
-                )
-            
-            try:
-                # Read the JSON-RPC request
-                body = await request.json()
-                
-                logger.info(f"Received MCP request: method={body.get('method')}, id={body.get('id')}")
-                
-                # Handle MCP protocol messages
-                if body.get("method") == "tools/list":
-                    tools = await list_tools()
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": body.get("id"),
-                        "result": {
-                            "tools": [
-                                {
-                                    "name": tool.name,
-                                    "description": tool.description,
-                                    "inputSchema": tool.inputSchema
-                                }
-                                for tool in tools
-                            ]
-                        }
-                    }
-                    logger.info(f"Returning {len(tools)} tools")
-                    return JSONResponse(response)
-                
-                elif body.get("method") == "tools/call":
-                    params = body.get("params", {})
-                    tool_name = params.get("name")
-                    arguments = params.get("arguments", {})
-                    
-                    result = await call_tool(tool_name, arguments)
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": body.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": content.type,
-                                    "text": content.text
-                                }
-                                for content in result
-                            ]
-                        }
-                    }
-                    return JSONResponse(response)
-                
-                elif body.get("method") == "initialize":
-                    logger.info("Handling initialize request")
-                    tools = await list_tools()
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": body.get("id"),
-                        "result": {
-                            "protocolVersion": "2024-11-05",
-                            "capabilities": {
-                                "tools": {}
-                            },
-                            "serverInfo": {
-                                "name": "dora-mcp",
-                                "version": "1.0.0"
-                            },
-                            "tools": [
-                                {
-                                    "name": tool.name,
-                                    "description": tool.description,
-                                    "inputSchema": tool.inputSchema
-                                }
-                                for tool in tools
-                            ]
-                        }
-                    }
-                    logger.info("Initialize successful")
-                    return JSONResponse(response)
-                
-                # Handle notifications/initialized (client acknowledgment, no response needed)
-                elif body.get("method") == "notifications/initialized":
-                    logger.info("Received initialized notification")
-                    # Notifications don't require a response
-                    return JSONResponse({"jsonrpc": "2.0"}, status_code=200)
-                
-                else:
-                    return JSONResponse({
-                        "jsonrpc": "2.0",
-                        "id": body.get("id"),
-                        "error": {
-                            "code": -32601,
-                            "message": f"Method not found: {body.get('method')}"
-                        }
-                    })
-                    
-            except Exception as e:
-                logger.error(f"Error in MCP streamable endpoint: {e}")
-                return JSONResponse({
-                    "jsonrpc": "2.0",
-                    "id": body.get("id") if "body" in locals() else None,
-                    "error": {
-                        "code": -32603,
-                        "message": str(e)
-                    }
-                }, status_code=500)
-        
-        async def swagger_ui_endpoint(request):
-            """Serve Swagger UI for interactive API documentation."""
-            html = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>DORA Publications API - Swagger UI</title>
-                <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-                <style>
-                    body { margin: 0; padding: 0; }
-                </style>
-            </head>
-            <body>
-                <div id="swagger-ui"></div>
-                <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-                <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
-                <script>
-                    window.onload = function() {
-                        SwaggerUIBundle({
-                            url: "/api/openapi.yaml?v=" + Date.now(),
-                            dom_id: '#swagger-ui',
-                            presets: [
-                                SwaggerUIBundle.presets.apis,
-                                SwaggerUIStandalonePreset
-                            ],
-                            layout: "BaseLayout",
-                            deepLinking: true,
-                            showExtensions: true,
-                            showCommonExtensions: true
-                        });
-                    };
-                </script>
-            </body>
-            </html>
-            """
-            from starlette.responses import HTMLResponse
-            return HTMLResponse(html)
-        
-        async def serve_yaml_file(request):
-            """Serve YAML files from the api/ directory."""
-            from starlette.responses import Response, FileResponse, JSONResponse
-            import pathlib
-            import re
-
-            # Get filename from path params
-            filename = request.path_params.get("filename", "")
-            if not filename:
-                return JSONResponse({"error": "No filename provided"}, status_code=400)
-
-            # Ensure it ends with .yaml
-            if not filename.endswith(".yaml"):
-                filename = f"{filename}.yaml"
-            
-            # Extract just the filename to look in the api/ directory
-            # This handles cases like /api/openapi.yaml and /openapi.yaml
-            bare_filename = pathlib.Path(filename).name
-            
-            # YAML files live in api/ directory.
-            # We look in a few places to be robust (Docker vs local vs package)
-            # 1. Project root (parent of src/)
-            # 2. Package level (alongside dora_mcp/)
-            # 3. Current working directory
-            
-            # This file is at /app/src/dora_mcp/server.py or ./src/dora_mcp/server.py
-            current_file = pathlib.Path(__file__).resolve()
-            
-            # Possible locations for 'api' folder
-            search_paths = [
-                current_file.parent.parent.parent / "api", # src/../.. -> project root
-                current_file.parent.parent / "api",        # dora_mcp/.. -> src/
-                pathlib.Path.cwd() / "api",                # current dir
-                pathlib.Path.cwd(),                        # current dir itself
-            ]
-            
-            file_path = None
-            for path in search_paths:
-                candidate = path / bare_filename
-                if candidate.exists():
-                    file_path = candidate
-                    break
-
-            if not file_path:
-                logger.error(f"YAML file not found. Searched: {[str(p/bare_filename) for p in search_paths]}")
-                return JSONResponse(
-                    {"error": f"File not found: {bare_filename}", "searched_paths": [str(p/bare_filename) for p in search_paths]},
-                    status_code=404
-                )
-
-            # For openapi.yaml, replace the host and schemes fields with the actual
-            # request values so Swagger UI and any client use the correct server automatically.
-            if bare_filename == "openapi.yaml":
-                request_host = request.headers.get("host", "localhost")
-                request_scheme = request.url.scheme  # "http" or "https"
-                content = file_path.read_text(encoding="utf-8")
-                content = re.sub(
-                    r"^host:.*$",
-                    f"host: {request_host}",
-                    content,
-                    flags=re.MULTILINE,
-                )
-                content = re.sub(
-                    r"^schemes:.*?(?=^\S)",
-                    f"schemes:\n  - {request_scheme}\n",
-                    content,
-                    flags=re.MULTILINE | re.DOTALL,
-                )
-                return Response(
-                    content=content,
-                    media_type="application/x-yaml",
-                    headers={"Content-Disposition": f'inline; filename="{bare_filename}"'},
-                )
-
-            return FileResponse(
-                file_path,
-                media_type="application/x-yaml",
-                filename=bare_filename,
-            )
-        
-        starlette_app = Starlette(
-            debug=os.getenv("MCP_DEBUG", "false").lower() == "true",
-            routes=[
-                Route("/", endpoint=root_endpoint),
-                Route("/docs", endpoint=swagger_ui_endpoint),
-                Route("/health", endpoint=health_endpoint),
-                Route("/tools", endpoint=tools_endpoint),
-                Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
-                Route("/api/abstract", endpoint=abstract_api_endpoint, methods=["POST"]),
-                Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),
-                Route("/api/{filename:path}", endpoint=serve_yaml_file),
-                Route("/{filename:path}.yaml", endpoint=serve_yaml_file),
-            ],
-        )
-        
-        # Add CORS middleware for Copilot Studio compatibility
-        starlette_app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        
-        import uvicorn
-        logger.info(f"DORA MCP server is ready at http://{host}:{port}")
-        logger.info(f"MCP Streamable endpoint: http://{host}:{port}/mcp")
-        logger.info(f"Health check: http://{host}:{port}/health")
-        
-        config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
-        server = uvicorn.Server(config)
-        await server.serve()
-    else:
-        # stdio mode (default)
+    if transport == "stdio":
         logger.info("Starting DORA MCP server in stdio mode...")
         async with stdio_server() as (read_stream, write_stream):
             logger.info("DORA MCP server is ready and listening for requests")
             await app.run(read_stream, write_stream, app.create_initialization_options())
+        return
+
+    # HTTP mode (default) with Streamable transport
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "8000"))
+    
+    logger.info(f"Starting DORA MCP server in HTTP mode on {host}:{port}")
+    
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.responses import JSONResponse
+    from starlette.middleware.cors import CORSMiddleware
+    
+    # Simple REST endpoints for convenience
+    async def root_endpoint(request):
+        """Root endpoint — human-friendly landing page."""
+        import pathlib
+        from starlette.responses import HTMLResponse
+        base = str(request.base_url).rstrip("/")
+        template = (
+            pathlib.Path(__file__).parent / "templates" / "index.html"
+        ).read_text(encoding="utf-8")
+        html = template.replace("__BASE_URL__", base)
+        return HTMLResponse(html)
+    
+    async def health_endpoint(request):
+        """Health check endpoint."""
+        return JSONResponse({
+            "status": "healthy",
+            "service": "dora-mcp",
+            "transport": "http-streamable"
+        })
+    
+    async def tools_endpoint(request):
+        """List available tools as JSON."""
+        tools = await list_tools()
+        tools_data = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "inputSchema": tool.inputSchema
+            }
+            for tool in tools
+        ]
+        return JSONResponse({
+            "tools": tools_data
+        })
+    
+    async def search_api_endpoint(request):
+        """REST API endpoint for searching publications (for Copilot Studio)."""
+        if request.method != "POST":
+            return JSONResponse(
+                {"error": "Method not allowed. Use POST."},
+                status_code=405
+            )
+        
+        try:
+            body = await request.json()
+            search_string = body.get("search_string")
+            limit = body.get("limit", 20)
+            
+            if not search_string:
+                return JSONResponse(
+                    {"error": "search_string is required"},
+                    status_code=400
+                )
+            
+            # Perform the search
+            results = await search_dora_publications(search_string, limit=limit)
+            
+            # Calculate total count correctly
+            total_count = 0
+            if isinstance(results, list):
+                total_count = len(results)
+            elif isinstance(results, dict) and "results" in results:
+                total_count = len(results["results"])
+            
+            return JSONResponse({
+                "search_string": search_string,
+                "results": results,
+                "total": total_count
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in search API: {e}")
+            return JSONResponse(
+                {"error": str(e)},
+                status_code=500
+            )
+    
+    async def abstract_api_endpoint(request):
+        """REST API endpoint for retrieving a publication abstract."""
+        try:
+            body = await request.json()
+            identifier_or_url = body.get("identifier_or_url")
+
+            if not identifier_or_url:
+                return JSONResponse(
+                    {"error": "identifier_or_url is required"},
+                    status_code=400
+                )
+
+            result = await get_publication_abstract(identifier_or_url)
+            return JSONResponse(result)
+
+        except Exception as e:
+            logger.error(f"Error in abstract API: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def mcp_streamable_endpoint(request):
+        """MCP Streamable HTTP endpoint for Copilot Studio."""
+        # Handle GET requests - return instructions
+        if request.method == "GET":
+            tools = await list_tools()
+            return JSONResponse({
+                "message": "DORA MCP Server",
+                "version": "1.0.0",
+                "description": "MCP server for searching scientific publications in the DORA (Digital Object Repository for Academia) database",
+                "usage": {
+                    "note": "This endpoint uses the MCP (Model Context Protocol) with Streamable transport",
+                    "method": "POST",
+                    "protocol": "mcp-streamable-1.0",
+                    "content_type": "application/json",
+                    "instructions": [
+                        "Send POST requests with JSON-RPC 2.0 format",
+                        "Include method and params in request body",
+                        "Supported methods: initialize, tools/list, tools/call"
+                    ]
+                },
+                "available_tools": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "inputSchema": tool.inputSchema
+                    }
+                    for tool in tools
+                ],
+                "documentation": "https://github.com/Snowwpanda/dora_mcp"
+            }, status_code=200)
+        
+        # Only POST is allowed for MCP protocol
+        if request.method != "POST":
+            return JSONResponse(
+                {"error": "Method not allowed. This endpoint requires POST requests with MCP protocol."},
+                status_code=405
+            )
+        
+        try:
+            # Read the JSON-RPC request
+            body = await request.json()
+            
+            logger.info(f"Received MCP request: method={body.get('method')}, id={body.get('id')}")
+            
+            # Handle MCP protocol messages
+            if body.get("method") == "tools/list":
+                tools = await list_tools()
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "result": {
+                        "tools": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            for tool in tools
+                        ]
+                    }
+                }
+                logger.info(f"Returning {len(tools)} tools")
+                return JSONResponse(response)
+            
+            elif body.get("method") == "tools/call":
+                params = body.get("params", {})
+                tool_name = params.get("name")
+                arguments = params.get("arguments", {})
+                
+                result = await call_tool(tool_name, arguments)
+                
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "result": {
+                        "content": [
+                            {
+                                "type": content.type,
+                                "text": content.text
+                            }
+                            for content in result
+                        ]
+                    }
+                }
+                return JSONResponse(response)
+            
+            elif body.get("method") == "initialize":
+                logger.info("Handling initialize request")
+                tools = await list_tools()
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {
+                            "tools": {}
+                        },
+                        "serverInfo": {
+                            "name": "dora-mcp",
+                            "version": "1.0.0"
+                        },
+                        "tools": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            for tool in tools
+                        ]
+                    }
+                }
+                logger.info("Initialize successful")
+                return JSONResponse(response)
+            
+            # Handle notifications/initialized (client acknowledgment, no response needed)
+            elif body.get("method") == "notifications/initialized":
+                logger.info("Received initialized notification")
+                # Notifications don't require a response
+                return JSONResponse({"jsonrpc": "2.0"}, status_code=200)
+            
+            else:
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: {body.get('method')}"
+                    }
+                })
+                
+        except Exception as e:
+            logger.error(f"Error in MCP streamable endpoint: {e}")
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": body.get("id") if "body" in locals() else None,
+                "error": {
+                    "code": -32603,
+                    "message": str(e)
+                }
+            }, status_code=500)
+    
+    async def swagger_ui_endpoint(request):
+        """Serve Swagger UI for interactive API documentation."""
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>DORA Publications API - Swagger UI</title>
+            <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+            <style>
+                body { margin: 0; padding: 0; }
+            </style>
+        </head>
+        <body>
+            <div id="swagger-ui"></div>
+            <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+            <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+            <script>
+                window.onload = function() {
+                    SwaggerUIBundle({
+                        url: "/api/openapi.yaml?v=" + Date.now(),
+                        dom_id: '#swagger-ui',
+                        presets: [
+                            SwaggerUIBundle.presets.apis,
+                            SwaggerUIStandalonePreset
+                        ],
+                        layout: "BaseLayout",
+                        deepLinking: true,
+                        showExtensions: true,
+                        showCommonExtensions: true
+                    });
+                };
+            </script>
+        </body>
+        </html>
+        """
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(html)
+    
+    async def serve_yaml_file(request):
+        """Serve YAML files from the api/ directory."""
+        from starlette.responses import Response, FileResponse, JSONResponse
+        import pathlib
+        import re
+
+        # Get filename from path params
+        filename = request.path_params.get("filename", "")
+        if not filename:
+            return JSONResponse({"error": "No filename provided"}, status_code=400)
+
+        # Ensure it ends with .yaml
+        if not filename.endswith(".yaml"):
+            filename = f"{filename}.yaml"
+        
+        # Extract just the filename to look in the api/ directory
+        # This handles cases like /api/openapi.yaml and /openapi.yaml
+        bare_filename = pathlib.Path(filename).name
+        
+        # YAML files live in api/ directory.
+        # We look in a few places to be robust (Docker vs local vs package)
+        # 1. Project root (parent of src/)
+        # 2. Package level (alongside dora_mcp/)
+        # 3. Current working directory
+        
+        # This file is at /app/src/dora_mcp/server.py or ./src/dora_mcp/server.py
+        current_file = pathlib.Path(__file__).resolve()
+        
+        # Possible locations for 'api' folder
+        search_paths = [
+            current_file.parent.parent.parent / "api", # src/../.. -> project root
+            current_file.parent.parent / "api",        # dora_mcp/.. -> src/
+            pathlib.Path.cwd() / "api",                # current dir
+            pathlib.Path.cwd(),                        # current dir itself
+        ]
+        
+        file_path = None
+        for path in search_paths:
+            candidate = path / bare_filename
+            if candidate.exists():
+                file_path = candidate
+                break
+
+        if not file_path:
+            logger.error(f"YAML file not found. Searched: {[str(p/bare_filename) for p in search_paths]}")
+            return JSONResponse(
+                {"error": f"File not found: {bare_filename}", "searched_paths": [str(p/bare_filename) for p in search_paths]},
+                status_code=404
+            )
+
+        # For openapi.yaml, replace the host and schemes fields with the actual
+        # request values so Swagger UI and any client use the correct server automatically.
+        if bare_filename == "openapi.yaml":
+            request_host = request.headers.get("host", "localhost")
+            request_scheme = request.url.scheme  # "http" or "https"
+            content = file_path.read_text(encoding="utf-8")
+            content = re.sub(
+                r"^host:.*$",
+                f"host: {request_host}",
+                content,
+                flags=re.MULTILINE,
+            )
+            content = re.sub(
+                r"^schemes:.*?(?=^\S)",
+                f"schemes:\n  - {request_scheme}\n",
+                content,
+                flags=re.MULTILINE | re.DOTALL,
+            )
+            return Response(
+                content=content,
+                media_type="application/x-yaml",
+                headers={"Content-Disposition": f'inline; filename="{bare_filename}"'},
+            )
+
+        return FileResponse(
+            file_path,
+            media_type="application/x-yaml",
+            filename=bare_filename,
+        )
+    
+    starlette_app = Starlette(
+        debug=os.getenv("MCP_DEBUG", "false").lower() == "true",
+        routes=[
+            Route("/", endpoint=root_endpoint),
+            Route("/docs", endpoint=swagger_ui_endpoint),
+            Route("/health", endpoint=health_endpoint),
+            Route("/tools", endpoint=tools_endpoint),
+            Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
+            Route("/api/abstract", endpoint=abstract_api_endpoint, methods=["POST"]),
+            Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),
+            Route("/api/{filename:path}", endpoint=serve_yaml_file),
+            Route("/{filename:path}.yaml", endpoint=serve_yaml_file),
+        ],
+    )
+    
+    # Add CORS middleware for Copilot Studio compatibility
+    starlette_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    import uvicorn
+    logger.info(f"DORA MCP server is ready at http://{host}:{port}")
+    logger.info(f"MCP Streamable endpoint: http://{host}:{port}/mcp")
+    logger.info(f"Health check: http://{host}:{port}/health")
+    
+    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+def run():
+    """Synchronous entry point for the MCP server."""
+    import asyncio
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    run()

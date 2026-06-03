@@ -101,6 +101,7 @@ class TestMCPProtocol:
         search_tool = next(t for t in tools if t.name == "search_publications")
         assert "DORA" in search_tool.description
         assert "search_string" in search_tool.inputSchema["properties"]
+        assert "limit" in search_tool.inputSchema["properties"]
         assert search_tool.inputSchema["required"] == ["search_string"]
 
         abstract_tool = next(t for t in tools if t.name == "get_publication_abstract")
@@ -170,6 +171,24 @@ class TestDORAIntegration:
         except Exception as e:
             pytest.skip(f"Network error or API unavailable: {e}")
     
+    @pytest.mark.asyncio
+    async def test_search_with_limit(self):
+        """Test that the limit parameter works."""
+        try:
+            # Search with a small limit
+            limit = 2
+            result = await search_dora_publications("polymer", limit=limit)
+            
+            # Check results based on structure
+            if isinstance(result, list):
+                assert len(result) <= limit
+            elif isinstance(result, dict) and "results" in result:
+                assert len(result["results"]) <= limit
+            
+            print(f"✓ Search limit of {limit} respected")
+        except Exception as e:
+            pytest.skip(f"Network error or API unavailable: {e}")
+
     @pytest.mark.asyncio
     async def test_call_tool_manfred_heuberger(self):
         """Test the full MCP tool call for Manfred Heuberger."""

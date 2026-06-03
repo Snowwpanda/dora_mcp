@@ -2,21 +2,25 @@
 
 MCP (Model Context Protocol) server for the [DORA](https://www.dora.lib4ri.ch/empa) scientific publications repository. Exposes two tools — search and abstract retrieval — over both stdio (Claude Desktop) and HTTP Streamable transport (Copilot Studio, web clients).
 
+## Requirements
+
+- **Python 3.10+**
+- **[uv](https://docs.astral.sh/uv/)** package manager
+
 ## Quick start
 
 ```bash
-# Install (requires uv — https://docs.astral.sh/uv/)
+# Install dependencies
 uv sync
 
-# Run locally in stdio mode (for Claude Desktop)
-uv run python -m dora_mcp
+# Setup environment
+cp .env.example .env
 
-# Run as HTTP server (for Copilot Studio / browser)
-$env:MCP_TRANSPORT="http"; $env:MCP_PORT="8000"; uv run python -m dora_mcp
-# Linux/macOS: MCP_TRANSPORT=http MCP_PORT=8000 uv run python -m dora_mcp
+# Run the server (defaults to stdio mode)
+uv run dora_mcp
 ```
 
-Open [http://localhost:8000](http://localhost:8000) for the landing page and Swagger UI.
+Edit the `.env` file to switch to `http` mode or change the port. Open [http://localhost:8000](http://localhost:8000) for the landing page and Swagger UI if running in HTTP mode.
 
 ## MCP tools
 
@@ -28,10 +32,13 @@ Open [http://localhost:8000](http://localhost:8000) for the landing page and Swa
 ### `search_publications`
 
 ```json
-{ "search_string": "manfred heuberger" }
+{ 
+  "search_string": "manfred heuberger",
+  "limit": 10 
+}
 ```
 
-Use short keywords or an author name (1–3 words). Searches title, abstract, authors, and other metadata with weighted relevance.
+Use short keywords or an author name (1–3 words). Searches title, abstract, authors, and other metadata with weighted relevance. `limit` is optional (default: 20).
 
 ### `get_publication_abstract`
 
@@ -67,7 +74,7 @@ For **stdio mode** (Claude runs the process directly):
   "mcpServers": {
     "dora": {
       "command": "uv",
-      "args": ["run", "python", "-m", "dora_mcp"],
+      "args": ["run", "dora-mcp"],
       "cwd": "/path/to/dora_mcp"
     }
   }
@@ -166,10 +173,6 @@ scripts/
   compare_results.py     # diff two test_results/ runs
 test_results/            # JSON snapshots (gitignored by default)
 ```
-
-### Disabled feature: PDF full text
-
-`get_publication_fulltext` is commented out in `server.py`. PDFs encode to ~2.4 M chars of base64 which exceeds practical MCP payload limits. To re-enable: uncomment the function, the `Tool` registration, the `call_tool` branch, and `import base64`.
 
 ## License
 

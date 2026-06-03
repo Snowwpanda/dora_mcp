@@ -83,6 +83,10 @@ paths:
                 type: string
                 description: Short search keywords or author name (1-3 keywords)
                 example: climate change
+              limit:
+                type: integer
+                description: Maximum number of results to return (default 20)
+                example: 10
       responses:
         200:
           description: Search results
