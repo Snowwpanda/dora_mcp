@@ -13,8 +13,9 @@ MCP (Model Context Protocol) server for the [DORA](https://www.dora.lib4ri.ch/em
 # Install dependencies
 uv sync
 
-# Setup environment
-cp .env.example .env
+# Setup environment (optional)
+# Linux/macOS: cp .env.example .env
+# Windows: copy .env.example .env
 
 # Run the server (defaults to http mode)
 uv run dora_mcp

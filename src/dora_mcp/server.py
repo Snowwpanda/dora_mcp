@@ -701,24 +701,20 @@ async def main():
         from starlette.responses import HTMLResponse
         return HTMLResponse(html)
     
-    async def serve_yaml_file(request):
-        """Serve YAML files from the api/ directory."""
+    async def serve_openapi_spec(request):
+        """Serve the standard openapi.yaml file."""
+        return await serve_yaml_file("openapi.yaml", request)
+
+    async def serve_copilot_spec(request):
+        """Serve the openapi-copilot-studio.yaml file."""
+        return await serve_yaml_file("openapi-copilot-studio.yaml", request)
+
+    async def serve_yaml_file(bare_filename: str, request):
+        """Internal helper to serve specific whitelisted YAML files."""
         from starlette.responses import Response, FileResponse, JSONResponse
         import pathlib
         import re
 
-        # Get filename from path params
-        filename = request.path_params.get("filename", "")
-        if not filename:
-            return JSONResponse({"error": "No filename provided"}, status_code=400)
-
-        # Ensure it ends with .yaml
-        if not filename.endswith(".yaml"):
-            filename = f"{filename}.yaml"
-        
-        # Extract just the filename to look in the api/ directory
-        bare_filename = pathlib.Path(filename).name
-        
         # This file is at /app/src/dora_mcp/server.py or ./src/dora_mcp/server.py
         current_file = pathlib.Path(__file__).resolve()
         
@@ -738,20 +734,17 @@ async def main():
                 break
 
         if not file_path:
-            logger.error(f"YAML file not found. Searched: {[str(p/bare_filename) for p in search_paths]}")
+            logger.error(f"Whitelisted YAML file not found: {bare_filename}")
             return JSONResponse(
-                {"error": f"File not found: {bare_filename}", "searched_paths": [str(p/bare_filename) for p in search_paths]},
+                {"error": f"File not found: {bare_filename}"},
                 status_code=404
             )
 
         # For openapi.yaml, we remove 'host' and 'schemes' so that Swagger UI
         # automatically uses the current host/scheme it's being accessed from.
-        # This is more robust for Docker, Fly.io, and local dev.
         if bare_filename == "openapi.yaml":
             content = file_path.read_text(encoding="utf-8")
-            # Remove host line
             content = re.sub(r"^host:.*$\n?", "", content, flags=re.MULTILINE)
-            # Remove schemes block
             content = re.sub(r"^schemes:.*?(?=^\S)", "", content, flags=re.MULTILINE | re.DOTALL)
             
             return Response(
@@ -776,8 +769,8 @@ async def main():
             Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
             Route("/api/abstract", endpoint=abstract_api_endpoint, methods=["POST"]),
             Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),
-            Route("/api/{filename:path}", endpoint=serve_yaml_file),
-            Route("/{filename:path}.yaml", endpoint=serve_yaml_file),
+            Route("/api/openapi.yaml", endpoint=serve_openapi_spec),
+            Route("/api/openapi-copilot-studio.yaml", endpoint=serve_copilot_spec),
         ],
     )
     
