@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-# import base64  # Disabled: was only used for get_publication_fulltext
 from typing import Any
 from urllib.parse import quote
 
@@ -188,7 +187,7 @@ async def get_publication_abstract(identifier_or_url: str) -> dict[str, Any]:
         identifier_or_url: Either a full URL or publication identifier
 
     Returns:
-        Dictionary with publication_id, url, and abstract
+        Dictionary with publication_id, url, abstract_text, and abstract_html
     """
     publication_id = extract_publication_id(identifier_or_url)
     public_url = build_publication_url(publication_id)
@@ -207,7 +206,7 @@ async def get_publication_abstract(identifier_or_url: str) -> dict[str, Any]:
             return {
                 "publication_id": publication_id,
                 "url": public_url,
-                "abstract": abstract_elem.get_text(strip=True),
+                "abstract_text": abstract_elem.get_text(strip=True),
                 "abstract_html": str(abstract_elem),
             }
         logger.warning(f"Abstract element not found in admin HTML for {publication_id}, trying GraphQL")
@@ -237,7 +236,8 @@ async def get_publication_abstract(identifier_or_url: str) -> dict[str, Any]:
                 return {
                     "publication_id": publication_id,
                     "url": info.get('url') or public_url,
-                    "abstract": info['abstract'],
+                    "abstract_text": info['abstract'],
+                    "abstract_html": None,
                 }
     except Exception as e:
         logger.error(f"GraphQL fallback also failed for {publication_id}: {e}")
@@ -245,74 +245,10 @@ async def get_publication_abstract(identifier_or_url: str) -> dict[str, Any]:
     return {
         "publication_id": publication_id,
         "url": public_url,
-        "abstract": None,
+        "abstract_text": None,
+        "abstract_html": None,
         "error": "Abstract not found via admin HTML or GraphQL"
     }
-
-
-# DISABLED: Payload too large for MCP protocol
-# async def get_publication_fulltext(identifier_or_url: str) -> dict[str, Any]:
-#     """Get the fulltext PDF document of a publication.
-#     
-#     Args:
-#         identifier_or_url: Either a full URL or publication identifier
-#     
-#     Returns:
-#         Dictionary with publication_id, url, pdf_url, and pdf_content (bytes)
-#     """
-#     publication_id = extract_publication_id(identifier_or_url)
-#     html_content = await get_publication_page(identifier_or_url)
-#     
-#     soup = BeautifulSoup(html_content, 'html.parser')
-#     
-#     # Find the "Published Version" link
-#     pdf_link = None
-#     for link in soup.find_all('a'):
-#         if link.get_text(strip=True) == "Published Version":
-#             pdf_link = link.get('href')
-#             break
-#     
-#     if not pdf_link:
-#         return {
-#             "publication_id": publication_id,
-#             "url": build_publication_url(publication_id),
-#             "pdf_url": None,
-#             "pdf_content": None,
-#             "error": "Published Version link not found on page"
-#         }
-#     
-#     # Make sure the PDF URL is absolute
-#     if pdf_link.startswith('/'):
-#         pdf_link = f"https://www.dora.lib4ri.ch{pdf_link}"
-#     elif not pdf_link.startswith('http'):
-#         pdf_link = f"{DORA_BASE_URL}/{pdf_link}"
-#     
-#     # Download the PDF content
-#     logger.info(f"Downloading PDF from: {pdf_link}")
-#     try:
-#         async with httpx.AsyncClient(timeout=60.0) as client:  # Longer timeout for PDF downloads
-#             pdf_response = await client.get(pdf_link)
-#             pdf_response.raise_for_status()
-#             pdf_content = pdf_response.content
-#             
-#             logger.info(f"Successfully downloaded PDF ({len(pdf_content)} bytes)")
-#             
-#             return {
-#                 "publication_id": publication_id,
-#                 "url": build_publication_url(publication_id),
-#                 "pdf_url": pdf_link,
-#                 "pdf_content": pdf_content,
-#                 "pdf_size_bytes": len(pdf_content)
-#             }
-#     except httpx.HTTPError as e:
-#         logger.error(f"Failed to download PDF: {e}")
-#         return {
-#             "publication_id": publication_id,
-#             "url": build_publication_url(publication_id),
-#             "pdf_url": pdf_link,
-#             "pdf_content": None,
-#             "error": f"Failed to download PDF: {str(e)}"
-#         }
 
 
 @app.list_tools()
@@ -371,32 +307,6 @@ async def list_tools() -> list[Tool]:
                 "required": ["identifier_or_url"],
             },
         ),
-        # DISABLED: Payload too large for MCP protocol
-        # Tool(
-        #     name="get_publication_fulltext",
-        #     description=(
-        #         "Retrieve and download the full text PDF of a specific publication from DORA. "
-        #         "Requires either the full publication URL (e.g., "
-        #         "'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') "
-        #         "or just the publication identifier (e.g., 'empa:27842'). "
-        #         "Returns the complete PDF document encoded as base64, along with the PDF URL and size. "
-        #         "The PDF can be decoded from base64 and saved as a binary file."
-        #     ),
-        #     inputSchema={
-        #         "type": "object",
-        #         "properties": {
-        #             "identifier_or_url": {
-        #                 "type": "string",
-        #                 "description": (
-        #                     "Either the full DORA publication URL "
-        #                     "(e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') "
-        #                     "or just the publication identifier (e.g., 'empa:27842')."
-        #                 ),
-        #             },
-        #         },
-        #         "required": ["identifier_or_url"],
-        #     },
-        # ),
     ]
 
 
@@ -449,38 +359,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     text=response_text,
                 )
             ]
-        
-        # DISABLED: Payload too large for MCP protocol
-        # elif name == "get_publication_fulltext":
-        #     identifier_or_url = arguments.get("identifier_or_url")
-        #     if not identifier_or_url:
-        #         raise ValueError("identifier_or_url is required")
-        #     
-        #     result = await get_publication_fulltext(identifier_or_url)
-        #     
-        #     # Format the response
-        #     if result.get("error"):
-        #         response_text = f"Error retrieving PDF:\n{result['error']}\n\n"
-        #         response_text += f"Publication URL: {result['url']}"
-        #         if result.get('pdf_url'):
-        #             response_text += f"\nPDF URL: {result['pdf_url']}"
-        #     else:
-        #         # Encode PDF content as base64 for safe transmission
-        #         pdf_base64 = base64.b64encode(result['pdf_content']).decode('utf-8')
-        #         
-        #         response_text = f"Full text PDF for {result['publication_id']}:\n\n"
-        #         response_text += f"Publication URL: {result['url']}\n"
-        #         response_text += f"PDF URL: {result['pdf_url']}\n"
-        #         response_text += f"PDF Size: {result['pdf_size_bytes']:,} bytes\n\n"
-        #         response_text += f"PDF Content (base64 encoded):\n{pdf_base64}\n\n"
-        #         response_text += f"Note: The PDF is base64 encoded. To use it, decode the base64 string back to binary."
-        #     
-        #     return [
-        #         TextContent(
-        #             type="text",
-        #             text=response_text,
-        #         )
-        #     ]
         
         else:
             raise ValueError(f"Unknown tool: {name}")
@@ -782,25 +660,52 @@ async def main():
             return HTMLResponse(html)
         
         async def serve_yaml_file(request):
-            """Serve YAML files, injecting the current Host into openapi.yaml."""
-            from starlette.responses import Response, FileResponse
+            """Serve YAML files from the api/ directory."""
+            from starlette.responses import Response, FileResponse, JSONResponse
             import pathlib
             import re
 
-            # Get the requested file path (add .yaml extension)
-            filename = request.path_params.get("filename", "openapi")
+            # Get filename from path params
+            filename = request.path_params.get("filename", "")
+            if not filename:
+                return JSONResponse({"error": "No filename provided"}, status_code=400)
+
+            # Ensure it ends with .yaml
             if not filename.endswith(".yaml"):
                 filename = f"{filename}.yaml"
+            
+            # Extract just the filename to look in the api/ directory
+            # This handles cases like /api/openapi.yaml and /openapi.yaml
+            bare_filename = pathlib.Path(filename).name
+            
+            # YAML files live in api/ directory.
+            # We look in a few places to be robust (Docker vs local vs package)
+            # 1. Project root (parent of src/)
+            # 2. Package level (alongside dora_mcp/)
+            # 3. Current working directory
+            
+            # This file is at /app/src/dora_mcp/server.py or ./src/dora_mcp/server.py
+            current_file = pathlib.Path(__file__).resolve()
+            
+            # Possible locations for 'api' folder
+            search_paths = [
+                current_file.parent.parent.parent / "api", # src/../.. -> project root
+                current_file.parent.parent / "api",        # dora_mcp/.. -> src/
+                pathlib.Path.cwd() / "api",                # current dir
+                pathlib.Path.cwd(),                        # current dir itself
+            ]
+            
+            file_path = None
+            for path in search_paths:
+                candidate = path / bare_filename
+                if candidate.exists():
+                    file_path = candidate
+                    break
 
-            # YAML files live in api/ at the project root
-            project_root = pathlib.Path(__file__).parent.parent.parent
-            # Strip any leading api/ prefix so both /openapi.yaml and /api/openapi.yaml work
-            bare_filename = filename.removeprefix("api/").removeprefix("api\\")
-            file_path = project_root / "api" / bare_filename
-
-            if not file_path.exists():
+            if not file_path:
+                logger.error(f"YAML file not found. Searched: {[str(p/bare_filename) for p in search_paths]}")
                 return JSONResponse(
-                    {"error": f"File not found: {filename}"},
+                    {"error": f"File not found: {bare_filename}", "searched_paths": [str(p/bare_filename) for p in search_paths]},
                     status_code=404
                 )
 
@@ -825,17 +730,17 @@ async def main():
                 return Response(
                     content=content,
                     media_type="application/x-yaml",
-                    headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                    headers={"Content-Disposition": f'inline; filename="{bare_filename}"'},
                 )
 
             return FileResponse(
                 file_path,
                 media_type="application/x-yaml",
-                filename=filename,
+                filename=bare_filename,
             )
         
         starlette_app = Starlette(
-            debug=True,
+            debug=os.getenv("MCP_DEBUG", "false").lower() == "true",
             routes=[
                 Route("/", endpoint=root_endpoint),
                 Route("/docs", endpoint=swagger_ui_endpoint),
@@ -844,7 +749,8 @@ async def main():
                 Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
                 Route("/api/abstract", endpoint=abstract_api_endpoint, methods=["POST"]),
                 Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),
-                Route("/{filename:path}.yaml", endpoint=serve_yaml_file),  # Serve YAML files
+                Route("/api/{filename:path}", endpoint=serve_yaml_file),
+                Route("/{filename:path}.yaml", endpoint=serve_yaml_file),
             ],
         )
         

@@ -22,8 +22,8 @@ COPY requirements.txt ./
 # Copy application code
 COPY src/ ./src/
 
-# Copy OpenAPI specification files
-COPY *.yaml ./
+# Copy OpenAPI specification files into the expected api/ directory
+COPY api/ ./api/
 
 # Install dependencies using uv
 RUN uv pip install --system --no-cache -r requirements.txt
