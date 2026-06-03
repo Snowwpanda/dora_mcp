@@ -21,6 +21,32 @@ logger = logging.getLogger(__name__)
 DORA_BASE_URL = "https://www.dora.lib4ri.ch/empa"
 DORA_SEARCH_ENDPOINT = f"{DORA_BASE_URL}/islandora/search/json_cit_a"
 
+# DORA admin backend — serves classic server-rendered Islandora HTML (stable, no JS required)
+DORA_ADMIN_BASE_URL = "https://admin.dora.lib4ri.ch"
+
+# DORA GraphQL API — fallback for abstract fetching if admin HTML scraping fails
+DORA_GRAPHQL_URL = "https://apollo-prod.lib4ri.ch"
+DORA_GET_ITEM_QUERY = """
+query GetItem($subsite: Subsite!, $pid: ID!) {
+  item(subsite: $subsite, pid: $pid) {
+    ... on Item {
+      info {
+        pid
+        title
+        abstract
+        url
+      }
+    }
+  }
+}
+"""
+
+
+def build_admin_url(publication_id: str) -> str:
+    """Build the admin-backend URL for a publication (server-rendered HTML)."""
+    subsite = publication_id.split(':')[0] if ':' in publication_id else 'empa'
+    return f"{DORA_ADMIN_BASE_URL}/{subsite}/islandora/object/{publication_id}"
+
 # MCP Server instance
 app = Server("dora-mcp")
 
@@ -52,16 +78,21 @@ def extract_publication_id(identifier_or_url: str) -> str:
     """Extract publication ID from URL or identifier.
     
     Args:
-        identifier_or_url: Either a full URL like 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842'
+        identifier_or_url: Either a full URL like
+                          'https://www.dora.lib4ri.ch/empa/item/empa:27842' or
+                          'https://www.dora.lib4ri.ch/empa/item/empa:27842'
                           or just an identifier like 'empa:27842'
     
     Returns:
         Publication ID (e.g., 'empa:27842')
     """
-    # If it's a URL, extract the ID from it
     if identifier_or_url.startswith("http"):
-        # Match pattern like /object/empa:27842
-        match = re.search(r'/object/([^/\s]+)', identifier_or_url)
+        # New URL format: /item/empa:27842
+        match = re.search(r'/item/([^/\s?#]+)', identifier_or_url)
+        if match:
+            return match.group(1)
+        # Legacy URL format: /object/empa:27842
+        match = re.search(r'/object/([^/\s?#]+)', identifier_or_url)
         if match:
             return match.group(1)
         raise ValueError(f"Could not extract publication ID from URL: {identifier_or_url}")
@@ -82,7 +113,9 @@ def build_publication_url(publication_id: str) -> str:
     Returns:
         Full URL to the publication page
     """
-    return f"{DORA_BASE_URL}/islandora/object/{publication_id}"
+    # Extract the subsite prefix (e.g. 'empa' from 'empa:27842')
+    subsite = publication_id.split(':')[0] if ':' in publication_id else 'empa'
+    return f"https://www.dora.lib4ri.ch/{subsite}/item/{publication_id}"
 
 
 async def search_dora_publications(search_string: str) -> dict[str, Any]:
@@ -147,39 +180,73 @@ async def get_publication_page(identifier_or_url: str) -> str:
 
 async def get_publication_abstract(identifier_or_url: str) -> dict[str, Any]:
     """Get the abstract of a publication.
-    
+
+    Primary: scrapes the admin backend (server-rendered Islandora HTML).
+    Fallback: DORA GraphQL API.
+
     Args:
         identifier_or_url: Either a full URL or publication identifier
-    
+
     Returns:
         Dictionary with publication_id, url, and abstract
     """
     publication_id = extract_publication_id(identifier_or_url)
-    html_content = await get_publication_page(identifier_or_url)
-    
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
-    # Find the abstract in <p property="description">
-    abstract_elem = soup.find('p', property='description')
-    
-    if not abstract_elem:
-        return {
-            "publication_id": publication_id,
-            "url": build_publication_url(publication_id),
-            "abstract": None,
-            "error": "Abstract not found on page"
-        }
-    
-    # Get the HTML content of the abstract
-    abstract_html = str(abstract_elem)
-    # Also get plain text version
-    abstract_text = abstract_elem.get_text(strip=True)
-    
+    public_url = build_publication_url(publication_id)
+    admin_url = build_admin_url(publication_id)
+
+    # --- Primary: scrape admin Islandora HTML ---
+    try:
+        logger.info(f"Fetching abstract for {publication_id} from admin HTML")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(admin_url)
+            response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        abstract_elem = soup.find('p', property='description')
+        if abstract_elem:
+            return {
+                "publication_id": publication_id,
+                "url": public_url,
+                "abstract": abstract_elem.get_text(strip=True),
+                "abstract_html": str(abstract_elem),
+            }
+        logger.warning(f"Abstract element not found in admin HTML for {publication_id}, trying GraphQL")
+    except Exception as e:
+        logger.warning(f"Admin HTML fetch failed for {publication_id}: {e}, trying GraphQL")
+
+    # --- Fallback: GraphQL API ---
+    subsite = publication_id.split(':')[0] if ':' in publication_id else 'empa'
+    logger.info(f"Fetching abstract for {publication_id} via GraphQL fallback")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                DORA_GRAPHQL_URL,
+                json={
+                    'operationName': 'GetItem',
+                    'query': DORA_GET_ITEM_QUERY,
+                    'variables': {'subsite': subsite, 'pid': publication_id}
+                },
+                headers={'apollo-require-preflight': 'true'}
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        if 'errors' not in data:
+            info = (data.get('data', {}).get('item') or {}).get('info')
+            if info and info.get('abstract'):
+                return {
+                    "publication_id": publication_id,
+                    "url": info.get('url') or public_url,
+                    "abstract": info['abstract'],
+                }
+    except Exception as e:
+        logger.error(f"GraphQL fallback also failed for {publication_id}: {e}")
+
     return {
         "publication_id": publication_id,
-        "url": build_publication_url(publication_id),
-        "abstract_html": abstract_html,
-        "abstract_text": abstract_text
+        "url": public_url,
+        "abstract": None,
+        "error": "Abstract not found via admin HTML or GraphQL"
     }
 
 
@@ -285,7 +352,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Retrieve the abstract of a specific publication from DORA. "
                 "Requires either the full publication URL (e.g., "
-                "'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') "
+                "'https://www.dora.lib4ri.ch/empa/item/empa:27842') "
                 "or just the publication identifier (e.g., 'empa:27842'). "
                 "Returns both HTML-formatted and plain text versions of the abstract."
             ),
@@ -296,7 +363,7 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": (
                             "Either the full DORA publication URL "
-                            "(e.g., 'https://www.dora.lib4ri.ch/empa/islandora/object/empa:27842') "
+                            "(e.g., 'https://www.dora.lib4ri.ch/empa/item/empa:27842') "
                             "or just the publication identifier (e.g., 'empa:27842')."
                         ),
                     },
@@ -449,41 +516,15 @@ async def main():
         
         # Simple REST endpoints for convenience
         async def root_endpoint(request):
-            """Root endpoint with API documentation."""
-            return JSONResponse({
-                "service": "DORA MCP Server",
-                "version": "1.0.0",
-                "description": "Model Context Protocol server for DORA (Digital Object Repository for Academia)",
-                "transport": "http",
-                "endpoints": {
-                    "/": "API documentation (this page)",
-                    "/docs": "Swagger UI - Interactive API documentation",
-                    "/health": "Health check",
-                    "/tools": "List available MCP tools",
-                    "/mcp": "MCP Streamable endpoint (GET for info, POST for protocol - for Microsoft Copilot Studio)",
-                    "/api/search": "POST - Search DORA publications (REST API)",
-                    "/connector": "POST - Power Automate custom connector endpoint"
-                },
-                "openapi_specs": {
-                    "rest_api": "/openapi.yaml",
-                    "copilot_studio": "/openapi-copilot-studio.yaml",
-                    "tool_description": "/open_tool_description.yaml"
-                },
-                "mcp_protocol": "2024-11-05",
-                "copilot_studio": {
-                    "endpoint": "/mcp",
-                    "protocol": "mcp-streamable-1.0",
-                    "openapi_spec": "/openapi-copilot-studio.yaml",
-                    "tool_description": "/open_tool_description.yaml",
-                    "documentation": "See COPILOT_STUDIO.md"
-                },
-                "power_automate": {
-                    "endpoint": "/connector",
-                    "protocol": "REST API",
-                    "note": "Use /connector endpoint for Power Automate custom connectors"
-                },
-                "documentation": "https://github.com/Snowwpanda/dora_mcp"
-            })
+            """Root endpoint — human-friendly landing page."""
+            import pathlib
+            from starlette.responses import HTMLResponse
+            base = str(request.base_url).rstrip("/")
+            template = (
+                pathlib.Path(__file__).parent / "templates" / "index.html"
+            ).read_text(encoding="utf-8")
+            html = template.replace("__BASE_URL__", base)
+            return HTMLResponse(html)
         
         async def health_endpoint(request):
             """Health check endpoint."""
@@ -542,44 +583,25 @@ async def main():
                     status_code=500
                 )
         
-        async def connector_endpoint(request):
-            """Dedicated connector endpoint for Power Automate.
-            
-            This is a simple, clean endpoint designed specifically for Power Automate
-            custom connectors, with no MCP-related complexity.
-            """
-            if request.method != "POST":
-                return JSONResponse(
-                    {"error": "Method not allowed. Use POST."},
-                    status_code=405
-                )
-            
+        async def abstract_api_endpoint(request):
+            """REST API endpoint for retrieving a publication abstract."""
             try:
                 body = await request.json()
-                search_string = body.get("search_string")
-                
-                if not search_string:
+                identifier_or_url = body.get("identifier_or_url")
+
+                if not identifier_or_url:
                     return JSONResponse(
-                        {"error": "search_string parameter is required"},
+                        {"error": "identifier_or_url is required"},
                         status_code=400
                     )
-                
-                # Perform the search
-                results = await search_dora_publications(search_string)
-                
-                return JSONResponse({
-                    "search_string": search_string,
-                    "results": results,
-                    "total": len(results) if isinstance(results, list) else 0
-                })
-                
+
+                result = await get_publication_abstract(identifier_or_url)
+                return JSONResponse(result)
+
             except Exception as e:
-                logger.error(f"Error in connector endpoint: {e}")
-                return JSONResponse(
-                    {"error": str(e)},
-                    status_code=500
-                )
-      
+                logger.error(f"Error in abstract API: {e}")
+                return JSONResponse({"error": str(e)}, status_code=500)
+
         async def mcp_streamable_endpoint(request):
             """MCP Streamable HTTP endpoint for Copilot Studio."""
             # Handle GET requests - return instructions
@@ -740,7 +762,7 @@ async def main():
                 <script>
                     window.onload = function() {
                         SwaggerUIBundle({
-                            url: "/openapi.yaml",
+                            url: "/api/openapi.yaml?v=" + Date.now(),
                             dom_id: '#swagger-ui',
                             presets: [
                                 SwaggerUIBundle.presets.apis,
@@ -760,29 +782,56 @@ async def main():
             return HTMLResponse(html)
         
         async def serve_yaml_file(request):
-            """Serve static YAML files."""
-            from starlette.responses import FileResponse
+            """Serve YAML files, injecting the current Host into openapi.yaml."""
+            from starlette.responses import Response, FileResponse
             import pathlib
-            
+            import re
+
             # Get the requested file path (add .yaml extension)
             filename = request.path_params.get("filename", "openapi")
             if not filename.endswith(".yaml"):
                 filename = f"{filename}.yaml"
-            
-            # Get the project root directory (parent of src/)
+
+            # YAML files live in api/ at the project root
             project_root = pathlib.Path(__file__).parent.parent.parent
-            file_path = project_root / filename
-            
+            # Strip any leading api/ prefix so both /openapi.yaml and /api/openapi.yaml work
+            bare_filename = filename.removeprefix("api/").removeprefix("api\\")
+            file_path = project_root / "api" / bare_filename
+
             if not file_path.exists():
                 return JSONResponse(
                     {"error": f"File not found: {filename}"},
                     status_code=404
                 )
-            
+
+            # For openapi.yaml, replace the host and schemes fields with the actual
+            # request values so Swagger UI and any client use the correct server automatically.
+            if bare_filename == "openapi.yaml":
+                request_host = request.headers.get("host", "localhost")
+                request_scheme = request.url.scheme  # "http" or "https"
+                content = file_path.read_text(encoding="utf-8")
+                content = re.sub(
+                    r"^host:.*$",
+                    f"host: {request_host}",
+                    content,
+                    flags=re.MULTILINE,
+                )
+                content = re.sub(
+                    r"^schemes:.*?(?=^\S)",
+                    f"schemes:\n  - {request_scheme}\n",
+                    content,
+                    flags=re.MULTILINE | re.DOTALL,
+                )
+                return Response(
+                    content=content,
+                    media_type="application/x-yaml",
+                    headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                )
+
             return FileResponse(
                 file_path,
                 media_type="application/x-yaml",
-                filename=filename
+                filename=filename,
             )
         
         starlette_app = Starlette(
@@ -793,7 +842,7 @@ async def main():
                 Route("/health", endpoint=health_endpoint),
                 Route("/tools", endpoint=tools_endpoint),
                 Route("/api/search", endpoint=search_api_endpoint, methods=["POST"]),
-                Route("/connector", endpoint=connector_endpoint, methods=["POST"]),
+                Route("/api/abstract", endpoint=abstract_api_endpoint, methods=["POST"]),
                 Route("/mcp", endpoint=mcp_streamable_endpoint, methods=["GET", "POST"]),
                 Route("/{filename:path}.yaml", endpoint=serve_yaml_file),  # Serve YAML files
             ],
@@ -802,8 +851,7 @@ async def main():
         # Add CORS middleware for Copilot Studio compatibility
         starlette_app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],  # In production, restrict this to Copilot Studio domains
-            allow_credentials=True,
+            allow_origins=["*"],
             allow_methods=["*"],
             allow_headers=["*"],
         )

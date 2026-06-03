@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DORA MCP Server</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.6; }
+    h1 { color: #1a56a0; margin-bottom: 4px; }
+    h2 { color: #333; margin-top: 2em; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    h3 { color: #444; margin-top: 1.4em; margin-bottom: 6px; }
+    a { color: #1a56a0; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { text-align: left; padding: 8px 12px; border: 1px solid #ddd; vertical-align: top; }
+    th { background: #f4f8ff; }
+    code, pre { background: #f4f4f4; border-radius: 4px; font-size: 0.88em; }
+    code { padding: 2px 6px; }
+    pre { padding: 12px 16px; overflow-x: auto; border: 1px solid #e0e0e0; }
+    .badge { display: inline-block; color: #fff; border-radius: 3px; padding: 1px 7px; font-size: 0.8em; margin-right: 4px; background: #1a56a0; }
+    .badge.post { background: #2e7d32; }
+    .tip { background: #fffde7; border-left: 4px solid #f9a825; padding: 10px 16px; margin: 1em 0; border-radius: 2px; }
+    .note { background: #e8f4fd; border-left: 4px solid #1a56a0; padding: 10px 16px; margin: 1em 0; border-radius: 2px; }
+    ol li { margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <h1>DORA MCP Server</h1>
+  <p>Search and retrieve publication abstracts from the
+  <a href="https://www.dora.lib4ri.ch/empa" target="_blank">DORA</a>
+  (Digital Object Repository for Academia) database using AI assistants or a plain REST API.</p>
+
+  <div class="tip">
+    <strong>Interactive API docs:</strong>
+    Try all endpoints directly in the browser &rarr;
+    <a href="__BASE_URL__/docs">__BASE_URL__/docs</a> (Swagger UI)
+  </div>
+
+  <h2>What is MCP?</h2>
+  <p>The <a href="https://modelcontextprotocol.io/introduction" target="_blank">Model Context Protocol (MCP)</a>
+  is an open standard that lets AI assistants like Claude or Copilot call external tools and data sources in a
+  structured, secure way. Instead of copying data into a prompt, the AI asks the MCP server in real time &mdash;
+  the server runs the query and returns the result. MCP uses <strong>JSON-RPC 2.0</strong> over HTTP.</p>
+  <p>This server exposes two tools over MCP:</p>
+  <table>
+    <tr><th>Tool</th><th>What it does</th></tr>
+    <tr><td><code>search_publications</code></td><td>Search DORA by keyword or author name</td></tr>
+    <tr><td><code>get_publication_abstract</code></td><td>Fetch the abstract for a publication by ID or URL</td></tr>
+  </table>
+
+  <h2>Connect from Claude Desktop</h2>
+  <p>Claude Desktop supports remote MCP servers via a JSON config file.</p>
+
+  <h3>Production (fly.dev)</h3>
+  <ol>
+    <li>Open Claude Desktop &rarr; menu &rarr; <strong>Settings&hellip;</strong> &rarr; <strong>Developer</strong> tab &rarr; <strong>Edit Config</strong></li>
+    <li>The config file is at:<br>
+      &bull; macOS: <code>~/Library/Application Support/Claude/claude_desktop_config.json</code><br>
+      &bull; Windows: <code>%APPDATA%\Claude\claude_desktop_config.json</code>
+    </li>
+    <li>Add this entry and save:</li>
+  </ol>
+  <pre>{
+  "mcpServers": {
+    "dora": {
+      "type": "http",
+      "url": "https://dora-mcp-xrtnba.fly.dev/mcp"
+    }
+  }
+}</pre>
+  <ol start="4"><li>Fully quit and relaunch Claude Desktop. A tools icon appears in the chat input &mdash; click it to verify <em>search_publications</em> and <em>get_publication_abstract</em> are listed.</li></ol>
+
+  <h3>Local development</h3>
+  <p>Replace the URL with your local server:</p>
+  <pre>"url": "http://127.0.0.1:8000/mcp"</pre>
+
+  <div class="note">
+    <strong>Tip:</strong> Claude will automatically call the right tool when you ask things like
+    <em>&ldquo;Find DORA publications by Manfred Heuberger&rdquo;</em> or
+    <em>&ldquo;What is the abstract of empa:27842?&rdquo;</em>
+  </div>
+
+  <h2>Connect from Microsoft Copilot Studio</h2>
+  <p>Copilot Studio supports MCP Streamable transport (SSE is deprecated since August 2025).
+  <a href="https://learn.microsoft.com/en-us/microsoft-copilot-studio/agent-extend-action-mcp" target="_blank">Official docs &rarr;</a></p>
+  <div class="note"><strong>Prerequisite:</strong> Enable <em>Generative orchestration</em> in your agent settings before adding MCP tools.</div>
+  <ol>
+    <li>Open your agent &rarr; <strong>Tools</strong> page &rarr; <strong>Add a tool</strong> &rarr; <strong>New tool</strong> &rarr; <strong>Model Context Protocol</strong></li>
+    <li>Fill in:
+      <ul>
+        <li><strong>Server name:</strong> DORA Publications</li>
+        <li><strong>Description:</strong> Search and retrieve abstracts from the DORA scientific publications repository</li>
+        <li><strong>Server URL:</strong> <code>https://dora-mcp-xrtnba.fly.dev/mcp</code></li>
+        <li><strong>Authentication:</strong> None</li>
+      </ul>
+    </li>
+    <li>Select <strong>Create</strong>, then <strong>Add to agent</strong>.</li>
+  </ol>
+  <p>Alternatively, import <a href="__BASE_URL__/api/openapi-copilot-studio.yaml"><code>/api/openapi-copilot-studio.yaml</code></a>
+  as a custom connector via Power Apps (<strong>Add a tool &rarr; New tool &rarr; Custom connector &rarr; Import OpenAPI file</strong>).</p>
+
+  <h2>REST API endpoints</h2>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+    <tr><td><span class="badge">GET</span></td><td><a href="__BASE_URL__/health"><code>/health</code></a></td><td>Health check</td></tr>
+    <tr><td><span class="badge">GET</span></td><td><a href="__BASE_URL__/tools"><code>/tools</code></a></td><td>List MCP tools (JSON)</td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/api/search</code></td><td>Search DORA &mdash; body: <code>{"search_string": "climate change"}</code></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/api/abstract</code></td><td>Get abstract &mdash; body: <code>{"identifier_or_url": "empa:27842"}</code></td></tr>
+  </table>
+
+  <h2>OpenAPI specs</h2>
+  <table>
+    <tr><th>Spec</th><th>URL</th></tr>
+    <tr><td>REST API (Swagger 2.0)</td><td><a href="__BASE_URL__/api/openapi.yaml"><code>/api/openapi.yaml</code></a></td></tr>
+    <tr><td>Copilot Studio integration</td><td><a href="__BASE_URL__/api/openapi-copilot-studio.yaml"><code>/api/openapi-copilot-studio.yaml</code></a></td></tr>
+  </table>
+
+  <h2>Source &amp; documentation</h2>
+  <p><a href="https://github.com/Snowwpanda/dora_mcp" target="_blank">github.com/Snowwpanda/dora_mcp</a></p>
+</body>
+</html>

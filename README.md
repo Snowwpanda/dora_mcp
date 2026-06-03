@@ -1,176 +1,176 @@
 # dora_mcp
 
-MCP (Model Context Protocol) server for accessing DORA (Digital Object Repository for Academia) publications from the lib4ri Empa repository.
+MCP (Model Context Protocol) server for the [DORA](https://www.dora.lib4ri.ch/empa) scientific publications repository. Exposes two tools — search and abstract retrieval — over both stdio (Claude Desktop) and HTTP Streamable transport (Copilot Studio, web clients).
 
-## Overview
-
-This MCP server provides access to scientific publications in the DORA database at https://www.dora.lib4ri.ch/empa. It allows you to search for publications by author name, title, abstract, and other metadata fields.
-
-## Features
-
-- Search DORA publications database
-- Query across multiple fields (title, abstract, authors, contributors)
-- Returns JSON-formatted publication data
-- Runnable in Docker container
-
-## Installation
-
-### Prerequisites
-
-- Python 3.10+
-- [uv](https://github.com/astral-sh/uv) package manager (recommended, somehow pip causes errors)
-
-Install uv:
-```bash
-# On macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# On Windows
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-### Local Installation
+## Quick start
 
 ```bash
-# Install dependencies using uv
+# Install (requires uv — https://docs.astral.sh/uv/)
 uv sync
 
-# Activate the virtual environment
-source .venv/bin/activate  # On Linux/macOS
-# or
-.venv\Scripts\activate     # On Windows
-```
-
-### Docker Installation
-
-Build and start with Docker Compose:
-
-```bash
-# Build and start
-./docker.sh build
-./docker.sh start
-
-# Or manually
-docker-compose up -d
-```
-
-## Usage
-
-### Running Locally (stdio mode)
-
-For use with Claude Desktop or other MCP clients:
-
-```bash
-# Using uv
+# Run locally in stdio mode (for Claude Desktop)
 uv run python -m dora_mcp
 
-# Or with activated venv
-python -m dora_mcp
+# Run as HTTP server (for Copilot Studio / browser)
+$env:MCP_TRANSPORT="http"; $env:MCP_PORT="8000"; uv run python -m dora_mcp
+# Linux/macOS: MCP_TRANSPORT=http MCP_PORT=8000 uv run python -m dora_mcp
 ```
 
-### Running with Docker (HTTP mode)
+Open [http://localhost:8000](http://localhost:8000) for the landing page and Swagger UI.
 
-The Docker deployment runs in HTTP/SSE mode for web access:
+## MCP tools
 
-```bash
-# Start the server
-./docker.sh start
+| Tool | Description |
+|---|---|
+| `search_publications` | Search DORA by keyword or author name |
+| `get_publication_abstract` | Fetch the abstract for a publication by ID or URL |
 
-# Access at http://localhost:8000
-# SSE endpoint: http://localhost:8000/sse
-# Messages endpoint: http://localhost:8000/messages
+### `search_publications`
 
-# View logs
-./docker.sh logs
-
-# Run tests
-./docker.sh test
-
-# Stop the server
-./docker.sh stop
+```json
+{ "search_string": "manfred heuberger" }
 ```
 
-See [DOCKER.md](DOCKER.md) for detailed Docker deployment guide.
+Use short keywords or an author name (1–3 words). Searches title, abstract, authors, and other metadata with weighted relevance.
 
-### MCP Tools
+### `get_publication_abstract`
 
-The server provides the following tool:
+```json
+{ "identifier_or_url": "empa:27842" }
+```
 
-#### `search_publications`
+Accepts a full URL (`https://www.dora.lib4ri.ch/empa/item/empa:27842`) or just the publication identifier.
 
-Search the DORA database for scientific publications.
+## Connecting AI clients
 
-**Parameters:**
-- `search_string` (required): The search term to query. Can be an author name, title keyword, or any search term.
+### Claude Desktop
 
-**Example:**
+Add to `claude_desktop_config.json`
+(`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS):
+
 ```json
 {
-  "search_string": "manfred heuberger"
+  "mcpServers": {
+    "dora": {
+      "type": "http",
+      "url": "https://dora-mcp-xrtnba.fly.dev/mcp"
+    }
+  }
 }
 ```
 
-## API Details
+For a local server replace the URL with `http://127.0.0.1:8000/mcp`.  
+For **stdio mode** (Claude runs the process directly):
 
-The server queries the DORA API with the following endpoint pattern:
-
+```json
+{
+  "mcpServers": {
+    "dora": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "dora_mcp"],
+      "cwd": "/path/to/dora_mcp"
+    }
+  }
+}
 ```
-https://www.dora.lib4ri.ch/empa/islandora/search/json_cit_a/[query]?search_string=[term]&extension=false
+
+### Microsoft Copilot Studio
+
+1. Enable **Generative orchestration** in your agent settings.
+2. **Tools** → **Add a tool** → **New tool** → **Model Context Protocol**
+3. Server URL: `https://dora-mcp-xrtnba.fly.dev/mcp` — Authentication: None
+4. Select **Create**, then **Add to agent**.
+
+Alternatively import `api/openapi-copilot-studio.yaml` as a custom connector
+(**Add a tool → New tool → Custom connector → Import OpenAPI file**).
+
+## REST API
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Landing page |
+| GET | `/docs` | Swagger UI |
+| GET | `/health` | Health check |
+| GET | `/tools` | List MCP tools (JSON) |
+| POST | `/api/search` | Search — body: `{"search_string": "…"}` |
+| POST | `/api/abstract` | Abstract — body: `{"identifier_or_url": "empa:…"}` |
+| GET/POST | `/mcp` | MCP JSON-RPC endpoint |
+
+OpenAPI specs are served at `/api/openapi.yaml` (REST) and `/api/openapi-copilot-studio.yaml` (Copilot Studio).
+
+## Docker
+
+```bash
+./docker.sh build    # build image
+./docker.sh start    # start container (http://localhost:8000)
+./docker.sh stop     # stop container
+./docker.sh logs     # view logs
+./docker.sh status   # check status
+./docker.sh rebuild  # rebuild + restart
+./docker.sh clean    # remove everything
 ```
 
-The search query includes weighted searches across multiple fields:
-- Title (weight: 5)
-- Abstract (weight: 2)
-- Creator (weight: 2)
-- Original Author List (weight: 2)
-- Contributor (weight: 1)
-- Type (weight: 1)
-- Catch-all MODS fields (weight: 1)
+Or with docker-compose directly:
+
+```bash
+docker-compose up -d
+```
+
+Edit `docker-compose.yml` to change the port or environment variables.
+
+## Fly.io deployment
+
+```bash
+flyctl launch      # first deploy (detects fly.toml automatically)
+flyctl deploy      # redeploy after changes
+flyctl logs        # view logs
+flyctl status      # check status
+```
+
+The deployed app is available at `https://your-app-name.fly.dev`.
 
 ## Development
-
-### Requirements
-
-- Python 3.10+
-- uv package manager
-- Dependencies listed in `pyproject.toml`
 
 ### Testing
 
 ```bash
-# Install dev dependencies
-uv sync --all-extras
+uv run pytest tests/ -v                    # all tests
+uv run pytest tests/test_server.py -v     # unit tests
+uv run pytest tests/test_with_metrics.py -v -s  # metrics + JSON output
+uv run pytest tests/test_docker.py -v     # Docker tests (container must be running)
 
-# Run all tests
-uv run python -m pytest tests/ -v
-
-# Run specific test suites
-uv run python -m pytest tests/test_server.py -v          # Unit tests
-uv run python -m pytest tests/test_with_metrics.py -v   # Metrics tests
-uv run python -m pytest tests/test_docker.py -v         # Docker tests
-
-# Run manual tests
-uv run python examples/test_search.py
+python tests/test_mcp_endpoint.py http://localhost:8000   # live endpoint check
+python tests/test_search.py "manfred heuberger"           # manual search test
 ```
 
-See [TESTING.md](TESTING.md) for comprehensive testing documentation.
+Metrics tests write JSON snapshots to `test_results/`. Run `scripts/compare_results.py` to diff two runs.
 
-## Transport Modes
+### Project layout
 
-The server supports two transport modes:
-
-- **stdio** (default): For local MCP clients like Claude Desktop
-- **http**: For web deployment with SSE (Server-Sent Events)
-
-Set mode via environment variable:
-```bash
-# stdio mode (default)
-uv run python -m dora_mcp
-
-# HTTP mode
-MCP_TRANSPORT=http MCP_PORT=8000 uv run python -m dora_mcp
 ```
+src/dora_mcp/
+  server.py          # all server logic (MCP tools, HTTP routes)
+  templates/
+    index.html       # landing page template
+api/
+  openapi.yaml                  # Swagger 2.0 REST spec
+  openapi-copilot-studio.yaml   # Copilot Studio spec
+  open_tool_description.yaml    # tool description
+tests/
+  test_server.py         # unit tests
+  test_with_metrics.py   # metrics / output tests
+  test_docker.py         # Docker container tests
+  test_mcp_endpoint.py   # live endpoint smoke test
+  test_search.py         # manual search script
+scripts/
+  compare_results.py     # diff two test_results/ runs
+test_results/            # JSON snapshots (gitignored by default)
+```
+
+### Disabled feature: PDF full text
+
+`get_publication_fulltext` is commented out in `server.py`. PDFs encode to ~2.4 M chars of base64 which exceeds practical MCP payload limits. To re-enable: uncomment the function, the `Tool` registration, the `call_tool` branch, and `import base64`.
 
 ## License
 
-See LICENSE file for details.
+See [LICENSE](LICENSE).

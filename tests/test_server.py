@@ -87,37 +87,47 @@ class TestMCPProtocol:
     
     @pytest.mark.asyncio
     async def test_list_tools(self):
-        """Test that list_tools returns the correct tool definition."""
+        """Test that list_tools returns the correct tool definitions."""
         if TEST_MODE == "http":
             pytest.skip("Direct function calls not supported in HTTP mode")
-        
+
         tools = await list_tools()
-        
-        assert len(tools) == 1
-        tool = tools[0]
-        
-        assert tool.name == "search_publications"
-        assert "DORA" in tool.description
-        assert "search_string" in tool.inputSchema["properties"]
-        assert tool.inputSchema["required"] == ["search_string"]
+        tool_names = [t.name for t in tools]
+
+        assert len(tools) == 2
+        assert "search_publications" in tool_names
+        assert "get_publication_abstract" in tool_names
+
+        search_tool = next(t for t in tools if t.name == "search_publications")
+        assert "DORA" in search_tool.description
+        assert "search_string" in search_tool.inputSchema["properties"]
+        assert search_tool.inputSchema["required"] == ["search_string"]
+
+        abstract_tool = next(t for t in tools if t.name == "get_publication_abstract")
+        assert "identifier_or_url" in abstract_tool.inputSchema["properties"]
+        assert abstract_tool.inputSchema["required"] == ["identifier_or_url"]
     
     @pytest.mark.asyncio
     async def test_call_tool_unknown(self):
-        """Test that calling an unknown tool raises an error."""
+        """Test that calling an unknown tool returns an error TextContent."""
         if TEST_MODE == "http":
             pytest.skip("Direct function calls not supported in HTTP mode")
-        
-        with pytest.raises(ValueError, match="Unknown tool"):
-            await call_tool("nonexistent_tool", {})
+
+        result = await call_tool("nonexistent_tool", {})
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert "unknown tool" in result[0].text.lower() or "error" in result[0].text.lower()
     
     @pytest.mark.asyncio
     async def test_call_tool_missing_argument(self):
-        """Test that calling without required argument raises an error."""
+        """Test that calling without required argument returns an error TextContent."""
         if TEST_MODE == "http":
             pytest.skip("Direct function calls not supported in HTTP mode")
-        
-        with pytest.raises(ValueError, match="search_string is required"):
-            await call_tool("search_publications", {})
+
+        result = await call_tool("search_publications", {})
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert "search_string" in result[0].text.lower() or "error" in result[0].text.lower()
 
 
 class TestDORAIntegration:
@@ -248,11 +258,11 @@ class TestHTTPMode:
             pytest.skip("Only runs in HTTP mode")
         
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            # Test SSE endpoint exists
+            # Test MCP endpoint exists
             try:
-                async with client.stream("GET", f"{TEST_SERVER_URL}/sse") as response:
-                    assert response.status_code == 200
-                    print("✓ SSE endpoint accessible")
+                response = await client.get(f"{TEST_SERVER_URL}/mcp")
+                assert response.status_code == 200
+                print("✓ MCP endpoint accessible")
             except httpx.ConnectError:
                 pytest.fail(f"Cannot connect to {TEST_SERVER_URL}")
     
