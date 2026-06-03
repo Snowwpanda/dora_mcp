@@ -38,7 +38,7 @@ Edit the `.env` file to switch to `http` mode or change the port. Open [http://l
 }
 ```
 
-Use short keywords or an author name (1–3 words). Searches title, abstract, authors, and other metadata with weighted relevance. `limit` is optional (default: 20).
+Use short keywords or an author name (1–3 words). Searches title, abstract, authors, and other metadata with weighted relevance. `limit` is optional (default 20).
 
 ### `get_publication_abstract`
 

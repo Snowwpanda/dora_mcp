@@ -126,7 +126,7 @@ async def search_dora_publications(search_string: str, limit: int = 20) -> dict[
     
     Args:
         search_string: The search term to query
-        limit: Maximum number of results to return (default: 20)
+        limit: Maximum number of results to return (default 20)
         
     Returns:
         JSON response from DORA API containing publication results
@@ -297,7 +297,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of results to return (default: 20).",
+                        "description": "Maximum number of results to return (default 20).",
                         "default": 20,
                     },
                 },
@@ -675,8 +675,10 @@ async def main():
             <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
             <script>
                 window.onload = function() {
+                    // Use a relative path to the openapi.yaml
+                    const specUrl = window.location.origin + "/api/openapi.yaml?v=" + Date.now();
                     SwaggerUIBundle({
-                        url: "/api/openapi.yaml?v=" + Date.now(),
+                        url: specUrl,
                         dom_id: '#swagger-ui',
                         presets: [
                             SwaggerUIBundle.presets.apis,
@@ -711,14 +713,7 @@ async def main():
             filename = f"{filename}.yaml"
         
         # Extract just the filename to look in the api/ directory
-        # This handles cases like /api/openapi.yaml and /openapi.yaml
         bare_filename = pathlib.Path(filename).name
-        
-        # YAML files live in api/ directory.
-        # We look in a few places to be robust (Docker vs local vs package)
-        # 1. Project root (parent of src/)
-        # 2. Package level (alongside dora_mcp/)
-        # 3. Current working directory
         
         # This file is at /app/src/dora_mcp/server.py or ./src/dora_mcp/server.py
         current_file = pathlib.Path(__file__).resolve()
@@ -745,24 +740,16 @@ async def main():
                 status_code=404
             )
 
-        # For openapi.yaml, replace the host and schemes fields with the actual
-        # request values so Swagger UI and any client use the correct server automatically.
+        # For openapi.yaml, we remove 'host' and 'schemes' so that Swagger UI
+        # automatically uses the current host/scheme it's being accessed from.
+        # This is more robust for Docker, Fly.io, and local dev.
         if bare_filename == "openapi.yaml":
-            request_host = request.headers.get("host", "localhost")
-            request_scheme = request.url.scheme  # "http" or "https"
             content = file_path.read_text(encoding="utf-8")
-            content = re.sub(
-                r"^host:.*$",
-                f"host: {request_host}",
-                content,
-                flags=re.MULTILINE,
-            )
-            content = re.sub(
-                r"^schemes:.*?(?=^\S)",
-                f"schemes:\n  - {request_scheme}\n",
-                content,
-                flags=re.MULTILINE | re.DOTALL,
-            )
+            # Remove host line
+            content = re.sub(r"^host:.*$\n?", "", content, flags=re.MULTILINE)
+            # Remove schemes block
+            content = re.sub(r"^schemes:.*?(?=^\S)", "", content, flags=re.MULTILINE | re.DOTALL)
+            
             return Response(
                 content=content,
                 media_type="application/x-yaml",
