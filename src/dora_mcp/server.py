@@ -1,4 +1,8 @@
-"""MCP server for DORA (Digital Object Repository for Academia) publications."""
+"""MCP server for DORA (Digital Object Repository for Academia) publications.
+
+Exposes tools for searching publications and retrieving abstracts.
+Supports both stdio and HTTP (Streamable) transports.
+"""
 
 import logging
 import os
@@ -410,7 +414,7 @@ async def main():
         return
 
     # HTTP mode (default) with Streamable transport
-    host = os.getenv("MCP_HOST", "0.0.0.0")
+    host = os.getenv("MCP_HOST", "localhost")
     port = int(os.getenv("MCP_PORT", "8000"))
     
     logger.info(f"Starting DORA MCP server in HTTP mode on {host}:{port}")

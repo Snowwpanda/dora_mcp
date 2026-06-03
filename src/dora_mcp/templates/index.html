@@ -43,41 +43,9 @@
   <p>This server exposes two tools over MCP:</p>
   <table>
     <tr><th>Tool</th><th>What it does</th></tr>
-    <tr><td><code>search_publications</code></td><td>Search DORA by keyword or author name</td></tr>
+    <tr><td><code>search_publications</code></td><td>Search DORA by keyword or author name (returns up to 20 results by default)</td></tr>
     <tr><td><code>get_publication_abstract</code></td><td>Fetch the abstract for a publication by ID or URL</td></tr>
   </table>
-
-  <h2>Connect from Claude Desktop</h2>
-  <p>Claude Desktop supports remote MCP servers via a JSON config file.</p>
-
-  <h3>Production (fly.dev)</h3>
-  <ol>
-    <li>Open Claude Desktop &rarr; menu &rarr; <strong>Settings&hellip;</strong> &rarr; <strong>Developer</strong> tab &rarr; <strong>Edit Config</strong></li>
-    <li>The config file is at:<br>
-      &bull; macOS: <code>~/Library/Application Support/Claude/claude_desktop_config.json</code><br>
-      &bull; Windows: <code>%APPDATA%\Claude\claude_desktop_config.json</code>
-    </li>
-    <li>Add this entry and save:</li>
-  </ol>
-  <pre>{
-  "mcpServers": {
-    "dora": {
-      "type": "http",
-      "url": "https://dora-mcp-xrtnba.fly.dev/mcp"
-    }
-  }
-}</pre>
-  <ol start="4"><li>Fully quit and relaunch Claude Desktop. A tools icon appears in the chat input &mdash; click it to verify <em>search_publications</em> and <em>get_publication_abstract</em> are listed.</li></ol>
-
-  <h3>Local development</h3>
-  <p>Replace the URL with your local server:</p>
-  <pre>"url": "http://127.0.0.1:8000/mcp"</pre>
-
-  <div class="note">
-    <strong>Tip:</strong> Claude will automatically call the right tool when you ask things like
-    <em>&ldquo;Find DORA publications by Manfred Heuberger&rdquo;</em> or
-    <em>&ldquo;What is the abstract of empa:27842?&rdquo;</em>
-  </div>
 
   <h2>Connect from Microsoft Copilot Studio</h2>
   <p>Copilot Studio supports MCP Streamable transport (SSE is deprecated since August 2025).
@@ -103,7 +71,7 @@
     <tr><th>Method</th><th>Path</th><th>Description</th></tr>
     <tr><td><span class="badge">GET</span></td><td><a href="__BASE_URL__/health"><code>/health</code></a></td><td>Health check</td></tr>
     <tr><td><span class="badge">GET</span></td><td><a href="__BASE_URL__/tools"><code>/tools</code></a></td><td>List MCP tools (JSON)</td></tr>
-    <tr><td><span class="badge post">POST</span></td><td><code>/api/search</code></td><td>Search DORA &mdash; body: <code>{"search_string": "climate change"}</code></td></tr>
+    <tr><td><span class="badge post">POST</span></td><td><code>/api/search</code></td><td>Search DORA &mdash; body: <code>{"search_string": "climate change", "limit": 10}</code></td></tr>
     <tr><td><span class="badge post">POST</span></td><td><code>/api/abstract</code></td><td>Get abstract &mdash; body: <code>{"identifier_or_url": "empa:27842"}</code></td></tr>
   </table>
 
